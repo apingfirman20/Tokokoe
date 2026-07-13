@@ -1,0 +1,35 @@
+@import "tailwindcss";
+
+@theme {
+  --color-brand-green: #22c55e;
+  --color-brand-orange: #f97316;
+  --color-brand-dark: #1f2937;
+  --color-brand-light: #f3f4f6;
+}
+
+@layer base {
+  body {
+    @apply bg-brand-light text-brand-dark antialiased;
+  }
+}
+
+/* Print specific styles for thermal receipt */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  #printable-receipt, #printable-receipt * {
+    visibility: visible;
+  }
+  #printable-receipt {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 58mm; /* Standard thermal printer width */
+    padding: 0;
+    margin: 0;
+    font-size: 12px;
+    line-height: 1.2;
+    font-family: monospace;
+  }
+}
