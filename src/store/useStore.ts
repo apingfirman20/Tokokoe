@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { User, Branch, Product, Transaction, Shift, StockMovement, StockTransfer, ActivityLog } from '../types';
+import type { User, Branch, Product, Transaction, Shift, StockMovement, StockTransfer, ActivityLog, BranchStock } from '../types';
 import { firestoreService } from '../lib/firestore';
 
 // Removed Dummy Data
@@ -15,6 +15,7 @@ interface AppState {
   branches: Branch[];
   users: User[];
   products: Product[];
+  branchStocks: BranchStock[];
   
   // Transactions, Shifts, Transfers & Logs
   transactions: Transaction[];
@@ -23,9 +24,16 @@ interface AppState {
   stockTransfers: StockTransfer[];
   activityLogs: ActivityLog[];
 
-  // Actions
+  // Product Actions
   addProduct: (product: Product) => void;
   updateProduct: (product: Product) => void;
+  
+  // BranchStock Actions
+  addBranchStock: (bs: BranchStock) => void;
+  updateBranchStock: (bsId: string, updates: Partial<BranchStock>) => void;
+  setBranchStocks: (stocks: BranchStock[]) => void;
+
+  // Transaction & Shift Actions
   addTransaction: (transaction: Transaction) => void;
   openShift: (shift: Shift) => void;
   closeShift: (shiftId: string, endingCashActual: number) => void;
@@ -42,6 +50,16 @@ interface AppState {
   addActivityLog: (log: ActivityLog) => void;
 }
 
+// Helper: get stock for a product at a specific branch
+export const getProductStock = (branchStocks: BranchStock[], productId: string, branchId: string): BranchStock | undefined => {
+  return branchStocks.find(bs => bs.productId === productId && bs.branchId === branchId);
+};
+
+// Helper: get total stock across all branches
+export const getTotalStock = (branchStocks: BranchStock[], productId: string): number => {
+  return branchStocks.filter(bs => bs.productId === productId).reduce((sum, bs) => sum + bs.stock, 0);
+};
+
 export const useStore = create<AppState>()(
   persist(
     (set, get) => ({
@@ -49,6 +67,7 @@ export const useStore = create<AppState>()(
       branches: [],
       users: [],
       products: [],
+      branchStocks: [],
       transactions: [],
       shifts: [],
       stockMovements: [],
@@ -75,28 +94,50 @@ export const useStore = create<AppState>()(
           products: state.products.map(p => p.id === updated.id ? updated : p)
         }));
       },
+
+      // BranchStock actions
+      addBranchStock: (bs) => {
+        firestoreService.add('branchStocks', bs, bs.id);
+        set((state) => ({ branchStocks: [...state.branchStocks, bs] }));
+      },
+      updateBranchStock: (bsId, updates) => {
+        firestoreService.update('branchStocks', bsId, updates);
+        set((state) => ({
+          branchStocks: state.branchStocks.map(bs => bs.id === bsId ? { ...bs, ...updates } : bs)
+        }));
+      },
+      setBranchStocks: (stocks) => set({ branchStocks: stocks }),
+
       addTransaction: (transaction) => {
         firestoreService.add('transactions', transaction, transaction.id);
         set((state) => {
-          // Reduce stock
+          // Reduce stock from branchStocks
+          const updatedBranchStocks = state.branchStocks.map(bs => {
+            if (bs.branchId === transaction.branchId) {
+              const item = transaction.items.find(i => i.productId === bs.productId);
+              if (item) {
+                const newStock = bs.stock - item.quantity;
+                firestoreService.update('branchStocks', bs.id, { stock: newStock });
+                return { ...bs, stock: newStock };
+              }
+            }
+            return bs;
+          });
+
+          // Also update legacy product.stock for backward compat
           const updatedProducts = state.products.map(p => {
             const item = transaction.items.find(i => i.productId === p.id);
-            if (item) {
-              return { ...p, stock: p.stock - item.quantity };
+            if (item && p.stock !== undefined) {
+              return { ...p, stock: (p.stock || 0) - item.quantity };
             }
             return p;
           });
+
           return {
             transactions: [...state.transactions, transaction],
+            branchStocks: updatedBranchStocks,
             products: updatedProducts
           };
-        });
-        
-        // Update product stocks in firestore
-        const state = get();
-        transaction.items.forEach(item => {
-          const product = state.products.find(p => p.id === item.productId);
-          if (product) firestoreService.update('products', product.id, { stock: product.stock });
         });
       },
       openShift: (shift) => {
@@ -203,7 +244,7 @@ export const useStore = create<AppState>()(
         if (logAction) {
           logs.push({
             id: `log${Date.now()}`,
-            userId: updates.receivedByUserId || state.stockTransfers[index].sentByUserId, // Might be sender cancelling
+            userId: updates.receivedByUserId || state.stockTransfers[index].sentByUserId,
             branchId: updated.toBranchId,
             action: logAction,
             description: desc,
@@ -211,30 +252,26 @@ export const useStore = create<AppState>()(
           });
         }
 
-        // Apply stock changes if approved
-        let newProducts = state.products;
+        // Apply stock changes via branchStocks if approved
+        let newBranchStocks = state.branchStocks;
         if (updates.status === 'approved') {
-          newProducts = state.products.map(p => {
-             // Decrease from sender
-             if (p.branchId === updated.fromBranchId) {
-                const item = updated.items.find(i => i.productId === p.id);
-                if (item) {
-                  const newStock = p.stock - item.quantity;
-                  firestoreService.update('products', p.id, { stock: newStock });
-                  return { ...p, stock: newStock };
-                }
-             }
-             // Increase to receiver
-             if (p.branchId === updated.toBranchId) {
-                const item = updated.items.find(i => i.productId === p.id); // By ID directly for simplicity
-                const sourceItemProduct = state.products.find(sp => sp.id === item?.productId);
-                if (sourceItemProduct && sourceItemProduct.sku === p.sku) {
-                  const newStock = p.stock + (item?.quantity || 0);
-                  firestoreService.update('products', p.id, { stock: newStock });
-                  return { ...p, stock: newStock };
-                }
-             }
-             return p;
+          newBranchStocks = state.branchStocks.map(bs => {
+            const item = updated.items.find(i => i.productId === bs.productId);
+            if (!item) return bs;
+            
+            // Decrease from sender branch
+            if (bs.branchId === updated.fromBranchId) {
+              const newStock = bs.stock - item.quantity;
+              firestoreService.update('branchStocks', bs.id, { stock: newStock });
+              return { ...bs, stock: newStock };
+            }
+            // Increase at receiver branch
+            if (bs.branchId === updated.toBranchId) {
+              const newStock = bs.stock + item.quantity;
+              firestoreService.update('branchStocks', bs.id, { stock: newStock });
+              return { ...bs, stock: newStock };
+            }
+            return bs;
           });
         }
 
@@ -243,7 +280,7 @@ export const useStore = create<AppState>()(
           firestoreService.add('activityLogs', logs[logs.length - 1], logs[logs.length - 1].id);
         }
 
-        return { stockTransfers: newTransfers, activityLogs: logs, products: newProducts };
+        return { stockTransfers: newTransfers, activityLogs: logs, branchStocks: newBranchStocks };
       }),
       
       addActivityLog: (log) => {

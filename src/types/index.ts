@@ -19,17 +19,28 @@ export interface Branch {
 
 export interface Product {
   id: string;
-  branchId: string;
   sku: string;
   name: string;
   category: string;
   purchasePrice: number;
   sellingPrice: number;
   unit: string;
-  stock: number;
-  minStock: number;
   imageUrl?: string;
   barcode?: string;
+  isActive: boolean;
+  variants?: string; // e.g. "Size: S, M, L"
+  // Legacy fields kept for backward compat during migration
+  branchId?: string;
+  stock?: number;
+  minStock?: number;
+}
+
+export interface BranchStock {
+  id: string;
+  productId: string;
+  branchId: string;
+  stock: number;
+  minStock: number;
 }
 
 export interface StockMovement {

@@ -7,7 +7,7 @@ import { QRCodeCanvas } from 'qrcode.react';
 import { Link } from 'react-router-dom';
 
 const POS = () => {
-  const { products, currentUser, addTransaction, shifts } = useStore();
+  const { products, branchStocks, currentUser, addTransaction, shifts } = useStore();
   const [cart, setCart] = useState<TransactionItem[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   
@@ -21,7 +21,9 @@ const POS = () => {
   const [paymentMethod, setPaymentMethod] = useState<'cash'|'card'|'qris'>('cash');
   const [amountPaid, setAmountPaid] = useState<number | ''>('');
 
-  const branchProducts = products.filter(p => p.branchId === currentUser?.branchId || p.branchId === 'b1'); // Fallback to b1 for dummy
+  // Use branchStocks to determine which products are available at this branch
+  const branchProductIds = branchStocks.filter(bs => bs.branchId === currentUser?.branchId && bs.stock > 0).map(bs => bs.productId);
+  const branchProducts = products.filter(p => branchProductIds.includes(p.id) || p.branchId === currentUser?.branchId);
 
   // Subtotal calculation
   const subtotal = cart.reduce((acc, item) => acc + item.subtotal, 0);

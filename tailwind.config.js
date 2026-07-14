@@ -8,10 +8,10 @@ export default {
     extend: {
       colors: {
         brand: {
-          green: '#22c55e',
+          green: '#d4af37', // Gold color matching the logo
           orange: '#f97316',
-          dark: '#1f2937',
-          light: '#f3f4f6',
+          dark: '#0f172a', // Navy blue matching the logo background
+          light: '#f8fafc',
         }
       }
     },

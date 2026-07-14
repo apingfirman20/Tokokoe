@@ -4,7 +4,7 @@ import { ArrowRightLeft, Camera, Check, X } from 'lucide-react';
 import type { StockTransfer } from '../types';
 
 const StockTransferPage = () => {
-  const { currentUser, branches, products, stockTransfers, addStockTransfer, updateStockTransfer } = useStore();
+  const { currentUser, branches, products, branchStocks, stockTransfers, addStockTransfer, updateStockTransfer } = useStore();
   const [showModal, setShowModal] = useState(false);
   
   const [toBranchId, setToBranchId] = useState('');
@@ -17,7 +17,8 @@ const StockTransferPage = () => {
     currentUser?.role === 'owner' || t.fromBranchId === currentUser?.branchId || t.toBranchId === currentUser?.branchId
   );
 
-  const availableProducts = products.filter(p => p.branchId === currentUser?.branchId);
+  const availableProductIds = branchStocks.filter(bs => bs.branchId === currentUser?.branchId && bs.stock > 0).map(bs => bs.productId);
+  const availableProducts = products.filter(p => availableProductIds.includes(p.id));
 
   const handleCreateTransfer = (e: React.FormEvent) => {
     e.preventDefault();
@@ -25,7 +26,8 @@ const StockTransferPage = () => {
     const product = products.find(p => p.id === selectedProductId);
     if (!product) return;
 
-    if (quantity > product.stock) {
+    const bs = branchStocks.find(s => s.productId === selectedProductId && s.branchId === currentUser?.branchId);
+    if (quantity > (bs?.stock || 0)) {
       return alert('Stok tidak mencukupi untuk transfer.');
     }
 

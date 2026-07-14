@@ -32,12 +32,15 @@ const Layout = () => {
       {/* Sidebar */}
       <aside className="w-64 bg-brand-dark text-white flex flex-col">
         <div className="p-6">
-          <h1 className="text-2xl font-bold text-brand-green flex items-center gap-2">
-            <ShoppingCart className="w-8 h-8" />
-            TokoKoe
-          </h1>
-          <div className="mt-2 text-sm text-gray-400">
-            {currentUser?.name} ({currentUser?.role})
+          <div className="flex items-center gap-3 mb-3">
+            <img src="/logo.png" alt="TokoKoe Logo" className="w-11 h-11 rounded-lg object-contain" />
+            <div>
+              <h1 className="text-lg font-bold text-[#d4af37]">TokoKoe</h1>
+              <p className="text-[10px] tracking-widest uppercase text-gray-400 font-medium">Premium Retail POS</p>
+            </div>
+          </div>
+          <div className="mt-2 text-sm text-gray-400 bg-white/5 rounded-lg px-3 py-2">
+            {currentUser?.name} <span className="text-[#d4af37] font-medium">({currentUser?.role})</span>
           </div>
         </div>
         
@@ -46,9 +49,9 @@ const Layout = () => {
             <button
               key={item.name}
               onClick={() => navigate(item.path)}
-              className="flex items-center gap-3 w-full px-4 py-3 text-left rounded-lg hover:bg-gray-800 transition-colors"
+              className="flex items-center gap-3 w-full px-4 py-3 text-left rounded-lg hover:bg-[#d4af37]/10 hover:text-[#d4af37] transition-colors"
             >
-              <item.icon className="w-5 h-5 text-brand-orange" />
+              <item.icon className="w-5 h-5 text-[#d4af37]" />
               {item.name}
             </button>
           ))}
