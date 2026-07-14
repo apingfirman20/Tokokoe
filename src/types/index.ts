@@ -14,6 +14,9 @@ export interface Branch {
   id: string;
   name: string;
   address: string;
+  phone?: string;
+  picName?: string;
+  operationalHours?: string; // e.g. "08:00 - 22:00"
   isActive: boolean;
 }
 

@@ -24,6 +24,10 @@ interface AppState {
   stockTransfers: StockTransfer[];
   activityLogs: ActivityLog[];
 
+  // Branch Actions
+  addBranch: (branch: Branch) => void;
+  updateBranch: (branchId: string, branch: Branch) => void;
+
   // Product Actions
   addProduct: (product: Product) => void;
   updateProduct: (product: Product) => void;
@@ -183,6 +187,16 @@ export const useStore = create<AppState>()(
         return { shifts: newShifts, activityLogs: [...state.activityLogs, newLog] };
       }),
       
+      addBranch: (branch) => {
+        firestoreService.add('branches', branch, branch.id);
+        set((state) => ({ branches: [...state.branches, branch] }));
+      },
+      updateBranch: (branchId, branch) => {
+        firestoreService.update('branches', branchId, branch);
+        set((state) => ({
+          branches: state.branches.map(b => b.id === branchId ? branch : b)
+        }));
+      },
       addUser: (user) => {
         firestoreService.add('users', user, user.id);
         set((state) => ({ users: [...state.users, user] }));
