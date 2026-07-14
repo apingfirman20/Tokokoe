@@ -6,7 +6,17 @@ const Login = () => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
-  const login = useStore(state => state.login);
+  const { login, users, branches, addUser } = useStore();
+
+  // Auto-seed if empty for testing
+  React.useEffect(() => {
+    if (users.length === 0) {
+      console.log('Seeding dummy users for testing...');
+      addUser({ id: 'u1', username: 'owner', password: '123', name: 'Owner System', role: 'owner' });
+      addUser({ id: 'u2', username: 'admin1', password: '123', name: 'Admin Cabang 1', role: 'admin', branchId: 'b1' });
+      addUser({ id: 'u3', username: 'kasir1', password: '123', name: 'Kasir Cabang 1', role: 'kasir', branchId: 'b1' });
+    }
+  }, [users.length, addUser]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -24,12 +34,12 @@ const Login = () => {
   return (
     <div className="min-h-screen bg-brand-light flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden">
-        <div className="bg-brand-dark p-8 text-center">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-brand-green/20 text-brand-green mb-4">
-            <ShoppingCart className="w-8 h-8" />
+        <div className="bg-brand-dark p-8 text-center flex flex-col items-center">
+          <div className="w-24 h-24 mb-4 bg-white/5 p-2 rounded-2xl border border-white/10 shadow-lg">
+            <img src="/logo.png" alt="TokoKoe Logo" className="w-full h-full object-contain" />
           </div>
-          <h1 className="text-3xl font-bold text-white">TokoKoe</h1>
-          <p className="text-gray-400 mt-2">Point of Sale System</p>
+          <h1 className="text-3xl font-bold text-[#d4af37]">TokoKoe</h1>
+          <p className="text-gray-400 mt-2">Premium Retail POS</p>
         </div>
         
         <div className="p-8">
@@ -50,7 +60,7 @@ const Login = () => {
                   type="text"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
-                  className="pl-10 w-full p-3 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand-green focus:border-transparent transition-all outline-none"
+                  className="pl-10 w-full p-3 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-[#d4af37] focus:border-transparent transition-all outline-none"
                   placeholder="Masukkan username..."
                 />
               </div>
@@ -67,7 +77,7 @@ const Login = () => {
                   type="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="pl-10 w-full p-3 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand-green focus:border-transparent transition-all outline-none"
+                  className="pl-10 w-full p-3 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-[#d4af37] focus:border-transparent transition-all outline-none"
                   placeholder="Masukkan password..."
                 />
               </div>
@@ -75,7 +85,7 @@ const Login = () => {
 
             <button
               type="submit"
-              className="w-full bg-brand-orange hover:bg-orange-600 text-white font-semibold py-3 px-4 rounded-lg transition-colors duration-200"
+              className="w-full bg-[#d4af37] hover:bg-[#c5a030] text-brand-dark font-bold py-3 px-4 rounded-xl shadow-lg transition-colors duration-200"
             >
               Masuk
             </button>
