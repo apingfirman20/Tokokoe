@@ -203,6 +203,17 @@ const Products = () => {
     }
   };
 
+  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setCurrentProduct(prev => ({ ...prev, imageUrl: reader.result as string }));
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
   return (
     <div className="p-4 md:p-8" onClick={() => setOpenActionMenuId(null)}>
       {/* Header */}
@@ -312,6 +323,31 @@ const Products = () => {
         <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 mb-8 animate-in zoom-in-95">
           <h2 className="text-xl font-bold mb-5 text-brand-dark">{currentProduct.id ? 'Edit Produk' : 'Produk Baru'}</h2>
           <form onSubmit={handleSave} className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            
+            {/* Image Upload */}
+            <div className="md:col-span-3 flex items-start gap-4 mb-2">
+              <div className="w-24 h-24 bg-gray-50 rounded-xl border-2 border-dashed border-gray-300 flex items-center justify-center overflow-hidden relative group cursor-pointer shrink-0 hover:bg-gray-100 transition-colors">
+                {currentProduct.imageUrl ? (
+                  <img src={currentProduct.imageUrl} alt="Preview" className="w-full h-full object-cover" />
+                ) : (
+                  <ImageIcon className="w-8 h-8 text-gray-400" />
+                )}
+                <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                  <Upload className="w-6 h-6 text-white" />
+                </div>
+                <input type="file" accept="image/*" onChange={handleImageChange} className="absolute inset-0 opacity-0 cursor-pointer" />
+              </div>
+              <div className="pt-2">
+                <p className="text-sm font-bold text-brand-dark mb-1">Foto Produk</p>
+                <p className="text-xs text-gray-500 mb-2">Format yang didukung: JPG, PNG. Rekomendasi rasio 1:1.</p>
+                {currentProduct.imageUrl && (
+                  <button type="button" onClick={() => setCurrentProduct(prev => ({...prev, imageUrl: undefined}))} className="text-xs font-bold text-red-500 hover:text-red-600 px-3 py-1 bg-red-50 hover:bg-red-100 rounded-lg transition-colors">
+                    Hapus Foto
+                  </button>
+                )}
+              </div>
+            </div>
+
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Nama Produk *</label>
               <input required type="text" value={currentProduct.name || ''} onChange={e => setCurrentProduct({...currentProduct, name: e.target.value})} className="w-full p-2.5 border rounded-xl focus:ring-2 focus:ring-[#d4af37] outline-none" />
