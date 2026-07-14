@@ -1,10 +1,12 @@
 import React, { useState, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useStore } from '../store/useStore';
 import type { Branch } from '../types';
 import { Store, MapPin, Activity, Edit2, Phone, User, Clock, Users, Package, BarChart3, List, Grid, Power, X, Map, Plus, CheckCircle2, AlertCircle } from 'lucide-react';
 import clsx from 'clsx';
 
 const Branches = () => {
+  const navigate = useNavigate();
   const { branches, users, shifts, branchStocks, transactions, addBranch, updateBranch } = useStore();
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [isEditing, setIsEditing] = useState(false);
@@ -222,12 +224,12 @@ const Branches = () => {
             {/* Info Section */}
             <div className="p-5 flex-1 flex flex-col relative z-20 bg-white">
               <div className="flex gap-4 mb-5">
-                {/* Mini map placeholder */}
-                <div className="w-20 h-20 bg-gray-100 rounded-xl border border-gray-200 flex flex-col items-center justify-center text-gray-400 shrink-0 relative overflow-hidden">
-                  <Map className="w-8 h-8 opacity-50" />
-                  <div className="absolute inset-0 bg-gradient-to-t from-gray-200/50 to-transparent"></div>
-                  <span className="text-[9px] font-bold absolute bottom-1 uppercase">Map View</span>
-                </div>
+                {/* Map Link */}
+                <a href={`https://maps.google.com/?q=${encodeURIComponent(branch.address || branch.name)}`} target="_blank" rel="noreferrer" className="w-20 h-20 bg-blue-50 hover:bg-blue-100 rounded-xl border border-blue-100 flex flex-col items-center justify-center text-blue-400 shrink-0 relative overflow-hidden transition-colors cursor-pointer group shadow-inner">
+                  <Map className="w-8 h-8 opacity-60 group-hover:scale-110 transition-transform" />
+                  <div className="absolute inset-0 bg-gradient-to-t from-blue-200/40 to-transparent"></div>
+                  <span className="text-[9px] font-bold absolute bottom-1 uppercase text-blue-700">Buka Map</span>
+                </a>
                 
                 <div className="space-y-2.5 flex-1">
                   <div className="flex items-start gap-2 text-sm text-gray-600 leading-tight">
@@ -287,10 +289,10 @@ const Branches = () => {
               </div>
 
               <div className="mt-auto pt-4 border-t border-gray-100 grid grid-cols-2 gap-2">
-                <button className="flex items-center justify-center gap-1.5 px-2 py-2 bg-white hover:bg-gray-50 text-brand-dark rounded-lg transition-colors text-xs font-bold border border-gray-200">
+                <button onClick={() => navigate('/')} className="flex items-center justify-center gap-1.5 px-2 py-2 bg-white hover:bg-gray-50 text-brand-dark rounded-lg transition-colors text-xs font-bold border border-gray-200">
                   <BarChart3 className="w-3.5 h-3.5 text-[#d4af37]" /> Laporan
                 </button>
-                <button className="flex items-center justify-center gap-1.5 px-2 py-2 bg-white hover:bg-gray-50 text-brand-dark rounded-lg transition-colors text-xs font-bold border border-gray-200">
+                <button onClick={() => navigate('/transfer')} className="flex items-center justify-center gap-1.5 px-2 py-2 bg-white hover:bg-gray-50 text-brand-dark rounded-lg transition-colors text-xs font-bold border border-gray-200">
                   <Activity className="w-3.5 h-3.5 text-[#d4af37]" /> Log Stok
                 </button>
               </div>
