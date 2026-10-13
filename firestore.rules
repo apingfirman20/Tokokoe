@@ -1,0 +1,156 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // ==========================================
+    // FUNGSI PEMBANTU OTENTIKASI & RBAC
+    // ==========================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwnerOf(businessId) {
+      return isAuthenticated() && (
+        get(/databases/$(database)/documents/businesses/$(businessId)).data.ownerId == request.auth.uid
+      );
+    }
+
+    function isMemberOf(businessId) {
+      return isAuthenticated() && (
+        isOwnerOf(businessId) ||
+        exists(/databases/$(database)/documents/businesses/$(businessId)/members/$(request.auth.uid))
+      );
+    }
+
+    function getMemberData(businessId) {
+      return get(/databases/$(database)/documents/businesses/$(businessId)/members/$(request.auth.uid)).data;
+    }
+
+    function isManagerOrOwner(businessId) {
+      return isAuthenticated() && (
+        isOwnerOf(businessId) ||
+        (exists(/databases/$(database)/documents/businesses/$(businessId)/members/$(request.auth.uid)) &&
+         getMemberData(businessId).role in ['owner', 'manager'])
+      );
+    }
+
+    // ==========================================
+    // PROFIL PENGGUNA GLOBAL
+    // ==========================================
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // ==========================================
+    // INDEKS LOGIN STAF & IDEMPOTENCY KEYS
+    // Dikelola eksklusif oleh Firebase Admin SDK di server
+    // ==========================================
+    match /staffLogins/{username} {
+      allow read, write: if false;
+    }
+
+    // ==========================================
+    // ENTITAS BISNIS & ISOLASI MULTI-TENANT
+    // ==========================================
+    match /businesses/{businessId} {
+      // Hanya pemilik terverifikasi atau anggota resmi bisnis yang dapat membaca profil usaha
+      allow read: if isAuthenticated() && (
+        resource.data.ownerId == request.auth.uid ||
+        isMemberOf(businessId)
+      );
+      allow create: if isAuthenticated() && request.resource.data.ownerId == request.auth.uid;
+      allow update, delete: if isOwnerOf(businessId);
+
+      // Subkoleksi Cabang
+      match /branches/{branchId} {
+        allow read: if isMemberOf(businessId);
+        allow write: if isOwnerOf(businessId);
+      }
+
+      // Subkoleksi Anggota Tim & Izin Karyawan
+      match /members/{memberId} {
+        allow read: if isMemberOf(businessId);
+        allow write: if isOwnerOf(businessId);
+      }
+
+      // Subkoleksi Produk & Katalog
+      // Kasir & staf hanya boleh membaca katalog; pembuatan & perubahan harga hanya oleh Owner / Manajer
+      match /products/{productId} {
+        allow read: if isMemberOf(businessId);
+        allow write: if isManagerOrOwner(businessId);
+      }
+
+      // Subkoleksi Transaksi Penjualan
+      // Transaksi penjualan tidak boleh dibuat atau dimanipulasi langsung oleh klien
+      // Seluruh checkout harus melalui transaksi atomik server (/api/sales/checkout)
+      match /sales/{saleId} {
+        allow read: if isMemberOf(businessId);
+        allow write: if false; // Mutlak dikelola oleh Admin SDK server
+      }
+
+      // Subkoleksi Unit IMEI (Khusus Phone Store)
+      // Dikelola secara aman melalui alur Purchase Order dan Checkout di server
+      match /imeiUnits/{unitId} {
+        allow read: if isMemberOf(businessId);
+        allow write: if false; // Mencegah pemalsuan status IMEI langsung dari browser
+      }
+
+      // Pendaftaran IMEI Deterministik (Pencegah duplikasi & konkurensi)
+      match /registeredImeis/{imei} {
+        allow read: if isMemberOf(businessId);
+        allow write: if false;
+      }
+
+      // Subkoleksi Histori IMEI (Audit Trail Fisik)
+      match /imeiHistory/{historyId} {
+        allow read: if isMemberOf(businessId);
+        allow write: if false; // Immutable audit trail
+      }
+
+      // Subkoleksi Pengajuan Penyesuaian Stok (Stock Adjustments)
+      match /stockAdjustments/{adjustmentId} {
+        allow read: if isMemberOf(businessId);
+        allow write: if false; // Harus diajukan & disetujui via server routes
+      }
+
+      // Subkoleksi Purchase Order (PO Distributor)
+      match /purchaseOrders/{poId} {
+        allow read: if isMemberOf(businessId);
+        allow write: if false; // Diterbitkan & diterima via server API berizin
+      }
+
+      // Kunci Idempotensi Transaksi
+      match /idempotencyKeys/{keyId} {
+        allow read, write: if false;
+      }
+
+      // Audit Log & Rekam Jejak Sistem
+      match /auditLogs/{logId} {
+        allow read: if isManagerOrOwner(businessId);
+        allow write: if false;
+      }
+
+      // Rekam Finansial & Pembukuan
+      match /financialRecords/{recordId} {
+        allow read: if isAuthenticated() && (
+          isOwnerOf(businessId) || 
+          (isMemberOf(businessId) && getMemberData(businessId).role in ['owner', 'manager', 'accountant'])
+        );
+        allow write: if isOwnerOf(businessId);
+      }
+
+      // Subkoleksi Sesi Kasir / Shift Laci
+      match /cashSessions/{sessionId} {
+        allow read: if isMemberOf(businessId);
+        allow write: if isMemberOf(businessId);
+      }
+
+      // Subkoleksi Meja Restoran (F&B)
+      match /tables/{tableId} {
+        allow read: if isMemberOf(businessId);
+        allow write: if isMemberOf(businessId);
+      }
+    }
+  }
+}
