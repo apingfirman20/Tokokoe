@@ -11,7 +11,7 @@ import {
 import { loadStore, saveStore, resetStore, getInitialStore, resetToDemoStore, getEmptyStore, AppStoreData } from '@/lib/data/store';
 import { useAuth } from './AuthContext';
 import { DEFAULT_MODULES_BY_TYPE } from '@/lib/modules/registry';
-import { DEFAULT_ROLE_PERMISSIONS } from '@/lib/permissions';
+import { DEFAULT_ROLE_PERMISSIONS, hasPermission } from '@/lib/permissions';
 import { executePosCheckout } from '@/lib/services/checkout-service';
 import { subscribeToBusinessTenant, subscribeToUserBusinesses } from '@/lib/services/firestore-repository';
 import { db } from '@/lib/firebase/client';
@@ -296,15 +296,39 @@ export function BusinessProvider({ children }: { children: React.ReactNode }) {
     return branches.find(br => br.id === activeBranchId) || branches[0] || null;
   }, [activeBusiness, branches, activeBranchId]);
 
+  // RBAC Permission Check: Protect confidential cost prices (HPP)
+  // Cashiers, waiters, and kitchen staff cannot access cost prices or purchase orders
+  const canViewCostPrice = React.useMemo(() => {
+    if (!user?.uid) return false;
+    if (user.role !== 'employee') return true; // Owner has full access
+    const member = (storeData.members || []).find(m => m.businessId === activeBusiness?.id && m.userId === user.uid);
+    const role: UserRole = member?.role || 'cashier';
+    return hasPermission(role, 'products.cost.read', member?.permissions);
+  }, [user, storeData.members, activeBusiness]);
+
   const products = React.useMemo(() => {
     if (!activeBusiness) return [];
-    return storeData.products.filter(p => p.businessId === activeBusiness.id);
-  }, [activeBusiness, storeData.products]);
+    const list = storeData.products.filter(p => p.businessId === activeBusiness.id);
+    if (!canViewCostPrice) {
+      return list.map(p => ({
+        ...p,
+        costPrice: 0, // Stripped for cashier / roles without products.cost.read
+      }));
+    }
+    return list;
+  }, [activeBusiness, storeData.products, canViewCostPrice]);
 
   const imeiUnits = React.useMemo(() => {
     if (!activeBusiness) return [];
-    return storeData.imeiUnits.filter(u => u.businessId === activeBusiness.id);
-  }, [activeBusiness, storeData.imeiUnits]);
+    const list = storeData.imeiUnits.filter(u => u.businessId === activeBusiness.id);
+    if (!canViewCostPrice) {
+      return list.map(u => ({
+        ...u,
+        costPrice: 0, // Stripped for cashier
+      }));
+    }
+    return list;
+  }, [activeBusiness, storeData.imeiUnits, canViewCostPrice]);
 
   const imeiHistories = React.useMemo(() => {
     if (!activeBusiness) return [];
@@ -332,9 +356,9 @@ export function BusinessProvider({ children }: { children: React.ReactNode }) {
   }, [activeBusiness, storeData.stockAdjustments]);
 
   const purchaseOrders = React.useMemo(() => {
-    if (!activeBusiness) return [];
+    if (!activeBusiness || !canViewCostPrice) return [];
     return (storeData.purchaseOrders || []).filter(po => po.businessId === activeBusiness.id);
-  }, [activeBusiness, storeData.purchaseOrders]);
+  }, [activeBusiness, storeData.purchaseOrders, canViewCostPrice]);
 
   const activeShift = React.useMemo(() => {
     if (!activeBusiness || !activeBranch) return null;

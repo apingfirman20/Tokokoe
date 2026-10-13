@@ -114,9 +114,13 @@ service cloud.firestore {
         allow write: if false; // Harus diajukan & disetujui via server routes
       }
 
-      // Subkoleksi Purchase Order (PO Distributor)
+      // Subkoleksi Purchase Order (PO Distributor & Dokumen HPP Modal)
+      // Kasir & waiter dilarang membaca PO; hanya Owner, Manager, dan Warehouse
       match /purchaseOrders/{poId} {
-        allow read: if isMemberOf(businessId);
+        allow read: if isAuthenticated() && (
+          isOwnerOf(businessId) || 
+          (isMemberOf(businessId) && getMemberData(businessId).role in ['owner', 'manager', 'warehouse'])
+        );
         allow write: if false; // Diterbitkan & diterima via server API berizin
       }
 

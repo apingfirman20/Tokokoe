@@ -41,7 +41,7 @@ Pada pengujian E2E sebelumnya, sistem menerima pengenal IMEI sintetis:
 - `860123456789001`
 - `860123456789002`
 
-Keduanya terdiri dari 15 digit angka, namun **gagal** (*invalid*) menurut algoritma standar internasional **Luhn Checksum** (digit ke-15 yang benar seharusnya `6` dan `4`). Pemeriksaan kode sebelumnya hanya mengandalkan regex panjang karakter sederhana `^\d{15}$` tanpa memvalidasi check digit. Selain itu, perangkat smartphone modern dual-SIM belum memiliki slot IMEI 2 terstandar, nomor seri fisik perangkat belum dipisahkan dari IMEI, dan duplikasi IMEI aktif antar cabang belum dicegah secara ketat di sisi server.
+Keduanya terdiri dari 15 digit angka, namun **gagal** (*invalid*) menurut algoritma standar internasional **Luhn Checksum**. Karena kedua pengenal tersebut memiliki 14 digit pertama yang identik (`86012345678900`), maka keduanya sama-sama membutuhkan check digit ke-15 berupa angka **6** (sehingga perbaikan dari prefix tersebut menghasilkan `860123456789006`). Digit terakhir `1` dan `2` pada data pengujian lama merupakan digit acak yang tidak memenuhi rumus Luhn. Untuk menghasilkan dua unit uji yang valid dan berbeda (distinct), unit kedua menggunakan prefix `86012345678901` dengan check digit `4` (`860123456789014`). Pemeriksaan kode sebelumnya hanya mengandalkan regex panjang karakter sederhana `^\d{15}$` tanpa memvalidasi check digit. Selain itu, perangkat smartphone modern dual-SIM belum memiliki slot IMEI 2 terstandar, nomor seri fisik perangkat belum dipisahkan dari IMEI, dan duplikasi IMEI aktif antar cabang belum dicegah secara ketat di sisi server.
 
 #### 2. Akar Masalah (Root Cause)
 1. Ketiadaan utilitas kalkulator dan validator algoritma Luhn di *client* maupun *server*.
