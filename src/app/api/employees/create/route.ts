@@ -11,15 +11,17 @@ import {
 } from "@/lib/server/auth-guard";
 
 const createEmployeeSchema = z.object({
-  businessId: z.string().min(1),
-  displayName: z.string().min(2).max(100),
-  username: z.string().min(3).max(50),
+  businessId: z.string().min(1, "ID bisnis wajib diisi."),
+  displayName: z.string().min(2, "Nama lengkap minimal 2 karakter.").max(100),
+  username: z.string().min(3, "Username minimal 3 karakter.").max(50),
   role: z.enum([
-    'owner', 'manager', 'cashier', 'warehouse', 
+    'manager', 'cashier', 'warehouse', 
     'accountant', 'waiter', 'kitchen', 'technician'
-  ]),
-  branchIds: z.array(z.string()).min(1),
-  initialPassword: z.string().min(6),
+  ], {
+    message: "Peran tidak valid. Peran 'owner' tidak dapat dibuat melalui pendaftaran karyawan."
+  }),
+  branchIds: z.array(z.string()).min(1, "Minimal pilih 1 cabang penugasan."),
+  initialPassword: z.string().min(6, "Kata sandi awal minimal 6 karakter."),
 });
 
 export async function POST(request: Request) {
@@ -28,11 +30,20 @@ export async function POST(request: Request) {
     const authUser = await requireAuthenticatedUser(request);
 
     const body = await request.json();
+
+    // Explicit defense-in-depth: Employee create is NEVER an ownership transfer route
+    if (body?.role === 'owner') {
+      return NextResponse.json(
+        { success: false, message: "Akses ditolak: Peran 'owner' tidak dapat dibuat melalui pendaftaran karyawan biasa. Alur pendaftaran karyawan bukan jalur pengalihan kepemilikan." },
+        { status: 403 }
+      );
+    }
+
     const parsed = createEmployeeSchema.safeParse(body);
 
     if (!parsed.success) {
       return NextResponse.json(
-        { success: false, message: "Data pendaftaran karyawan tidak valid", errors: parsed.error.issues },
+        { success: false, message: parsed.error.issues[0]?.message || "Data pendaftaran karyawan tidak valid", errors: parsed.error.issues },
         { status: 400 }
       );
     }
@@ -40,11 +51,48 @@ export async function POST(request: Request) {
     const { businessId, displayName, username, role, branchIds, initialPassword } = parsed.data;
 
     // 2. Enforce verified server permission: caller must have 'employees.create'
-    await requireBusinessPermission(businessId, authUser.uid, 'employees.create');
+    const callerMembership = await requireBusinessPermission(businessId, authUser.uid, 'employees.create');
 
-    // 3. Verify caller has access to the business branches being assigned
+    // Role Escalation Defense:
+    // A manager cannot create another manager or owner
+    if (callerMembership.role === 'manager' && (role as string === 'manager' || role as string === 'owner')) {
+      return NextResponse.json(
+        { success: false, message: "Akses ditolak: Manajer tidak berwenang membuat akun dengan peran manajer atau pemilik usaha. Hanya pemilik usaha (owner) yang memiliki kewenangan ini." },
+        { status: 403 }
+      );
+    }
+
+    // 3. Authoritative Branch Existence and Access Validation
     for (const bId of branchIds) {
+      const branchDoc = await adminDb.doc(`businesses/${businessId}/branches/${bId}`).get();
+      if (!branchDoc.exists) {
+        return NextResponse.json(
+          { success: false, message: `Cabang dengan ID '${bId}' tidak ditemukan pada bisnis ini.` },
+          { status: 400 }
+        );
+      }
+      const branchData = branchDoc.data();
+      if (branchData?.active === false) {
+        return NextResponse.json(
+          { success: false, message: `Cabang '${branchData?.name || bId}' sedang dinonaktifkan.` },
+          { status: 400 }
+        );
+      }
       await requireBranchAccess(businessId, authUser.uid, bId);
+    }
+
+    // 4. Verify assigned permissions do not exceed caller's authority
+    const targetPermissions = DEFAULT_ROLE_PERMISSIONS[role as UserRole] || [];
+    if (callerMembership.role !== 'owner') {
+      const exceedsAuthority = targetPermissions.some(
+        p => !callerMembership.permissions.includes(p)
+      );
+      if (exceedsAuthority) {
+        return NextResponse.json(
+          { success: false, message: "Akses ditolak: Anda tidak dapat memberikan izin yang melebihi kewenangan peran Anda sendiri." },
+          { status: 403 }
+        );
+      }
     }
 
     const normalizedUsername = username.trim().toLowerCase();

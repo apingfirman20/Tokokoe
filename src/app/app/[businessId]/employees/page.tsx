@@ -11,7 +11,7 @@ import {
 
 export default function EmployeesPage() {
   const { members, branches, addEmployee, activeBusiness } = useBusiness();
-  const { user } = useAuth();
+  const { user, getIdToken } = useAuth();
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [name, setName] = useState('');
@@ -23,6 +23,54 @@ export default function EmployeesPage() {
   const [errorMsg, setErrorMsg] = useState('');
   const [successInfo, setSuccessInfo] = useState<{ username: string; pass: string } | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Reset Password State for Staff
+  const [resetTargetMember, setResetTargetMember] = useState<any | null>(null);
+  const [newPasswordForReset, setNewPasswordForReset] = useState('');
+  const [resetErrorMsg, setResetErrorMsg] = useState('');
+  const [resetSuccessMsg, setResetSuccessMsg] = useState('');
+  const [isResettingPassword, setIsResettingPassword] = useState(false);
+
+  const handleResetPasswordSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!resetTargetMember || !activeBusiness) return;
+    setResetErrorMsg('');
+    setResetSuccessMsg('');
+
+    if (newPasswordForReset.length < 6) {
+      setResetErrorMsg('Kata sandi baru minimal 6 karakter.');
+      return;
+    }
+
+    setIsResettingPassword(true);
+    try {
+      const token = await getIdToken();
+      const res = await fetch('/api/auth/change-password', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          uid: resetTargetMember.userId,
+          username: resetTargetMember.username || resetTargetMember.displayName,
+          newPassword: newPasswordForReset,
+          businessId: activeBusiness.id,
+        }),
+      });
+
+      const data = await res.json();
+      setIsResettingPassword(false);
+      if (data.success) {
+        setResetSuccessMsg(`Kata sandi untuk ${resetTargetMember.displayName} berhasil direset. Sesi lama telah dicabut.`);
+      } else {
+        setResetErrorMsg(data.message || 'Gagal mereset kata sandi.');
+      }
+    } catch (err: any) {
+      setIsResettingPassword(false);
+      setResetErrorMsg(err.message || 'Terjadi kesalahan sistem saat mereset kata sandi.');
+    }
+  };
 
   // Suggested business slug for username formatting
   const bizSlug = activeBusiness?.name.toLowerCase().replace(/[^a-z0-9]/g, '') || 'tokokoe';
@@ -124,6 +172,7 @@ export default function EmployeesPage() {
                 <th className="py-3 px-4">Peran (Role)</th>
                 <th className="py-3 px-4">Cabang Bertugas</th>
                 <th className="py-3 px-4 text-center">Status</th>
+                <th className="py-3 px-4 text-center">Aksi</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -158,6 +207,25 @@ export default function EmployeesPage() {
                         {mem.status}
                       </span>
                     </td>
+                    <td className="py-3 px-4 text-center">
+                      {mem.role !== 'owner' ? (
+                        <button
+                          onClick={() => {
+                            setResetTargetMember(mem);
+                            setNewPasswordForReset('');
+                            setResetErrorMsg('');
+                            setResetSuccessMsg('');
+                          }}
+                          className="p-1 px-2 rounded-lg bg-slate-100 hover:bg-teal-50 text-slate-600 hover:text-teal-700 text-[10px] font-semibold border border-slate-200 hover:border-teal-300 inline-flex items-center gap-1 transition-colors"
+                          title="Reset Kata Sandi Karyawan"
+                        >
+                          <Key className="w-3 h-3 text-teal-600" />
+                          <span>Reset Sandi</span>
+                        </button>
+                      ) : (
+                        <span className="text-[10px] text-slate-400 italic">Owner</span>
+                      )}
+                    </td>
                   </tr>
                 );
               })}
@@ -165,6 +233,89 @@ export default function EmployeesPage() {
           </table>
         </div>
       </div>
+
+      {/* Reset Password Modal */}
+      {resetTargetMember && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl border border-slate-200">
+            <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <Key className="w-4 h-4 text-teal-600" />
+                <h3 className="font-bold text-sm text-slate-900">Reset Kata Sandi Staf</h3>
+              </div>
+              <button 
+                onClick={() => setResetTargetMember(null)} 
+                className="text-slate-400 hover:text-slate-700"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {resetSuccessMsg ? (
+              <div className="space-y-4 py-2">
+                <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-start gap-2">
+                  <Check className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                  <span>{resetSuccessMsg}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setResetTargetMember(null)}
+                  className="w-full py-2.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-semibold text-xs"
+                >
+                  Tutup
+                </button>
+              </div>
+            ) : (
+              <form onSubmit={handleResetPasswordSubmit} className="space-y-4">
+                <div className="p-3 rounded-lg bg-slate-50 border border-slate-200 text-xs text-slate-600">
+                  Target: <strong>{resetTargetMember.displayName}</strong> (<code className="text-teal-700">{resetTargetMember.username}</code>)
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    Sesi aktif karyawan akan dicabut seketika untuk keamanan.
+                  </p>
+                </div>
+
+                {resetErrorMsg && (
+                  <div className="p-3 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-xs">
+                    {resetErrorMsg}
+                  </div>
+                )}
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Kata Sandi Baru (Min. 6 Karakter) <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={newPasswordForReset}
+                    onChange={(e) => setNewPasswordForReset(e.target.value)}
+                    placeholder="Masukkan sandi baru"
+                    className="w-full text-xs p-2.5 rounded-xl border border-slate-300 outline-none focus:border-teal-500 font-mono"
+                  />
+                </div>
+
+                <div className="pt-2 flex justify-end gap-2">
+                  <button
+                    type="button"
+                    disabled={isResettingPassword}
+                    onClick={() => setResetTargetMember(null)}
+                    className="px-4 py-2 rounded-xl text-slate-600 text-xs font-semibold hover:bg-slate-100"
+                  >
+                    Batal
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isResettingPassword}
+                    className="px-5 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs disabled:opacity-60 flex items-center gap-1.5"
+                  >
+                    {isResettingPassword ? 'Menyimpan...' : 'Reset & Cabut Sesi'}
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Add Employee Modal */}
       {showAddModal && (

@@ -8,6 +8,7 @@ import {
   requireBranchAccess, 
   handleAuthApiError 
 } from "@/lib/server/auth-guard";
+import { canReadCostPrice, sanitizeImeiUnitDtos } from "@/lib/server/cost-protection";
 import { validateImei, normalizeImei, validateDualSimDevice } from "@/lib/validation/imei";
 
 const imeiDetailSchema = z.object({
@@ -287,10 +288,13 @@ export async function POST(request: Request) {
       });
     });
 
+    const allowedCost = canReadCostPrice(membership.role, membership.permissions);
+    const sanitizedUnits = sanitizeImeiUnitDtos(createdUnits, allowedCost);
+
     return NextResponse.json({
       success: true,
       receivedCount: cleanUnits.length,
-      createdUnits,
+      createdUnits: sanitizedUnits,
       createdHistories,
       message: `Berhasil menerima ${cleanUnits.length} unit IMEI ke inventaris toko.`
     });

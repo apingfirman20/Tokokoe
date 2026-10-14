@@ -199,7 +199,25 @@ export function BusinessProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!activeBusinessId) return;
 
+    const isCostAllowed = user?.role !== 'employee' || 
+      user?.memberRole === 'manager' || 
+      user?.memberRole === 'accountant' || 
+      (user?.permissions && user.permissions.includes('products.cost.read'));
+
     const unsubscribe = subscribeToBusinessTenant(activeBusinessId, (updates) => {
+      // Direct Data Sanitization: Strip HPP metrics immediately upon receipt across WebSocket
+      if (!isCostAllowed) {
+        if (updates.products) {
+          updates.products = updates.products.map(p => ({ ...p, costPrice: 0 }));
+        }
+        if (updates.imeiUnits) {
+          updates.imeiUnits = updates.imeiUnits.map(u => ({ ...u, costPrice: 0 }));
+        }
+        if (updates.purchaseOrders) {
+          updates.purchaseOrders = [];
+        }
+      }
+
       setStoreData((prev) => {
         const next = { ...prev };
         let hasChanges = false;
@@ -236,14 +254,15 @@ export function BusinessProvider({ children }: { children: React.ReactNode }) {
         }
 
         if (hasChanges) {
-          saveStore(next, user?.uid);
+          // Never persist cost price or confidential supplier documents to unauthorized user localStorage
+          saveStore(next, user?.uid, !isCostAllowed);
         }
         return next;
       });
     });
 
     return () => unsubscribe();
-  }, [activeBusinessId, user?.uid]);
+  }, [activeBusinessId, user?.uid, user?.role, user?.memberRole, user?.permissions]);
 
   // Filter businesses strictly to only those owned by or assigned to the authenticated user
   const userBusinesses = React.useMemo(() => {

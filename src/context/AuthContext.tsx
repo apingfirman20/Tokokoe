@@ -29,7 +29,7 @@ interface AuthContextType {
   user: AuthSessionUser | null;
   isLoading: boolean;
   loginAsOwner: (email: string, pass: string) => Promise<{ success: boolean; error?: string }>;
-  loginAsEmployee: (username: string, pass: string) => Promise<{ success: boolean; businessId?: string; mustChangePassword?: boolean; error?: string }>;
+  loginAsEmployee: (username: string, pass: string) => Promise<{ success: boolean; businessId?: string; mustChangePassword?: boolean; user?: any; error?: string }>;
   registerOwner: (name: string, email: string, pass: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => Promise<void>;
   getIdToken: () => Promise<string | null>;
@@ -152,7 +152,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const loginAsEmployee = async (
     username: string, 
     pass: string
-  ): Promise<{ success: boolean; businessId?: string; mustChangePassword?: boolean; error?: string }> => {
+  ): Promise<{ success: boolean; businessId?: string; mustChangePassword?: boolean; user?: any; error?: string }> => {
     setIsLoading(true);
     try {
       const cleanUsername = username.trim().toLowerCase();
@@ -189,7 +189,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return { 
         success: true, 
         businessId: data.user?.businessId, 
-        mustChangePassword: data.mustChangePassword 
+        mustChangePassword: data.mustChangePassword,
+        user: data.user
       };
     } catch (err) {
       console.error("Employee login exception:", err);

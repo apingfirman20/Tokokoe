@@ -1,4 +1,4 @@
-import { BusinessType, PermissionKey, UserRole } from "@/types";
+import { Business, BusinessType, PermissionKey, UserRole } from "@/types";
 import { hasPermission } from "../permissions";
 
 export interface BusinessModule {
@@ -236,4 +236,53 @@ export function getNavigationForUser(
   }
 
   return items;
+}
+
+/**
+ * Authoritatively validates whether a specific URL route is permitted for
+ * the current business vertical, active modules, and user role/permissions.
+ */
+export function evaluateRouteAccess(
+  pathname: string,
+  business: Business | null,
+  userRole: UserRole,
+  customPermissions?: PermissionKey[]
+): { allowed: boolean; reason?: string } {
+  if (!business) return { allowed: true };
+
+  // Match current route to module definition in MODULE_REGISTRY
+  for (const [modId, mod] of Object.entries(MODULE_REGISTRY)) {
+    const modPath = mod.path(business.id);
+    if (pathname === modPath || (modPath !== `/app/${business.id}` && pathname.startsWith(`${modPath}/`))) {
+      // 1. Business vertical check
+      if (!mod.allowedBusinessTypes.includes(business.businessType)) {
+        return {
+          allowed: false,
+          reason: `Modul '${mod.name}' hanya tersedia untuk unit bisnis bertipe ${mod.allowedBusinessTypes.join(', ').toUpperCase()}. Unit bisnis Anda saat ini bertipe ${business.businessType.toUpperCase()}.`,
+        };
+      }
+
+      // 2. Active enabled modules check
+      if (business.enabledModules && !business.enabledModules.includes(modId)) {
+        return {
+          allowed: false,
+          reason: `Modul '${mod.name}' sedang dinonaktifkan pada pengaturan unit bisnis ini.`,
+        };
+      }
+
+      // 3. User permission check
+      if (mod.requiredPermission) {
+        if (!hasPermission(userRole, mod.requiredPermission, customPermissions)) {
+          return {
+            allowed: false,
+            reason: `Akses ditolak: Peran '${userRole}' tidak memiliki izin '${mod.requiredPermission}' yang diperlukan untuk mengakses fitur '${mod.name}'.`,
+          };
+        }
+      }
+
+      return { allowed: true };
+    }
+  }
+
+  return { allowed: true };
 }

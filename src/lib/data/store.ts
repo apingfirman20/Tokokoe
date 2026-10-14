@@ -163,11 +163,18 @@ export function loadStore(userUid?: string): AppStoreData {
   }
 }
 
-export function saveStore(data: AppStoreData, userUid?: string) {
+export function saveStore(data: AppStoreData, userUid?: string, stripCostPrice: boolean = false) {
   if (typeof window !== 'undefined') {
     try {
       const key = getStorageKey(userUid);
-      localStorage.setItem(key, JSON.stringify(data));
+      const dataToSave: AppStoreData = stripCostPrice ? {
+        ...data,
+        products: (data.products || []).map(p => ({ ...p, costPrice: 0 })),
+        imeiUnits: (data.imeiUnits || []).map(u => ({ ...u, costPrice: 0 })),
+        purchaseOrders: [], // Confidential supplier purchase orders are NEVER persisted to unauthorized local storage
+      } : data;
+
+      localStorage.setItem(key, JSON.stringify(dataToSave));
       window.dispatchEvent(new Event('tokokoe_store_updated'));
     } catch (err) {
       console.error('Failed to save store to localStorage', err);

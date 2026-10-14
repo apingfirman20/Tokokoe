@@ -3,43 +3,66 @@ import { adminDb } from "@/lib/firebase/admin";
 import { Business, Branch, BusinessMember } from "@/types";
 import { requireAuthenticatedUser, handleAuthApiError } from "@/lib/server/auth-guard";
 
+export const dynamic = "force-dynamic";
+
 export async function GET(request: Request) {
   try {
     const authUser = await requireAuthenticatedUser(request);
 
     const businessMap = new Map<string, Business>();
 
-    // 1. Query businesses owned by this authenticated user
+    // 1. Query businesses owned by this authenticated user (must be active)
     const ownedSnapshot = await adminDb
       .collection("businesses")
       .where("ownerId", "==", authUser.uid)
       .get();
 
     ownedSnapshot.docs.forEach((doc) => {
-      businessMap.set(doc.id, { id: doc.id, ...doc.data() } as Business);
+      const data = doc.data() as Business;
+      if (data.status !== 'inactive' && data.status !== 'suspended') {
+        businessMap.set(doc.id, { ...data, id: doc.id });
+      }
     });
 
-    // 2. Direct business from custom claims or staff login mapping
+    // 2. Validate claim businessId against LIVE membership record (Never trust stale claims)
     if (authUser.businessId && !businessMap.has(authUser.businessId)) {
       try {
-        const bizDoc = await adminDb.doc(`businesses/${authUser.businessId}`).get();
-        if (bizDoc.exists) {
-          businessMap.set(bizDoc.id, { id: bizDoc.id, ...bizDoc.data() } as Business);
+        const memberDoc = await adminDb.doc(`businesses/${authUser.businessId}/members/${authUser.uid}`).get();
+        if (memberDoc.exists && memberDoc.data()?.status === 'active') {
+          const bizDoc = await adminDb.doc(`businesses/${authUser.businessId}`).get();
+          if (bizDoc.exists) {
+            const bizData = bizDoc.data() as Business;
+            if (bizData.status !== 'inactive' && bizData.status !== 'suspended') {
+              businessMap.set(bizDoc.id, { ...bizData, id: bizDoc.id });
+            }
+          }
         }
       } catch (bizFetchErr: any) {
-        console.warn("Direct business lookup notice:", bizFetchErr.message);
+        console.warn("Direct business verification notice:", bizFetchErr.message);
       }
     }
 
-    // 3. Query businesses where user is an employee/member
+    // 3. Query businesses where user is an active employee mapped in staffLogins
     try {
-      const staffSnap = await adminDb.collection("staffLogins").where("uid", "==", authUser.uid).get();
+      const staffSnap = await adminDb
+        .collection("staffLogins")
+        .where("uid", "==", authUser.uid)
+        .where("status", "==", "active")
+        .get();
+
       for (const sDoc of staffSnap.docs) {
         const bId = sDoc.data().businessId;
         if (bId && !businessMap.has(bId)) {
-          const bizDoc = await adminDb.doc(`businesses/${bId}`).get();
-          if (bizDoc.exists) {
-            businessMap.set(bizDoc.id, { id: bizDoc.id, ...bizDoc.data() } as Business);
+          // Verify live membership in that business
+          const memberDoc = await adminDb.doc(`businesses/${bId}/members/${authUser.uid}`).get();
+          if (memberDoc.exists && memberDoc.data()?.status === 'active') {
+            const bizDoc = await adminDb.doc(`businesses/${bId}`).get();
+            if (bizDoc.exists) {
+              const bizData = bizDoc.data() as Business;
+              if (bizData.status !== 'inactive' && bizData.status !== 'suspended') {
+                businessMap.set(bizDoc.id, { ...bizData, id: bizDoc.id });
+              }
+            }
           }
         }
       }
@@ -47,10 +70,12 @@ export async function GET(request: Request) {
       console.warn("Staff lookup notice:", staffErr.message);
     }
 
+    // 4. Query live active business members collectionGroup
     try {
       const memberSnapshot = await adminDb
         .collectionGroup("members")
         .where("userId", "==", authUser.uid)
+        .where("status", "==", "active")
         .get();
 
       for (const mDoc of memberSnapshot.docs) {
@@ -58,7 +83,10 @@ export async function GET(request: Request) {
         if (mData.businessId && !businessMap.has(mData.businessId)) {
           const bizDoc = await adminDb.doc(`businesses/${mData.businessId}`).get();
           if (bizDoc.exists) {
-            businessMap.set(bizDoc.id, { id: bizDoc.id, ...bizDoc.data() } as Business);
+            const bizData = bizDoc.data() as Business;
+            if (bizData.status !== 'inactive' && bizData.status !== 'suspended') {
+              businessMap.set(bizDoc.id, { ...bizData, id: bizDoc.id });
+            }
           }
         }
       }

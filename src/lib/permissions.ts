@@ -77,9 +77,14 @@ export function hasPermission(
   customPermissions?: PermissionKey[]
 ): boolean {
   if (role === 'owner') return true;
-  if (customPermissions && customPermissions.length > 0) {
+
+  // If customPermissions is explicitly provided as an array (even if empty []),
+  // respect the explicit configuration without falling back to role defaults.
+  if (Array.isArray(customPermissions)) {
     return customPermissions.includes(permission);
   }
+
+  // Fall back to standard role defaults only when customPermissions is undefined/null
   const defaultList = DEFAULT_ROLE_PERMISSIONS[role] || [];
   return defaultList.includes(permission);
 }

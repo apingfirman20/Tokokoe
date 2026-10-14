@@ -73,56 +73,19 @@ export async function requireBusinessMembership(businessId: string, userId: stri
     throw new AuthError(400, "Parameter businessId dan userId wajib diisi.");
   }
 
-  // 1. Check if user is the direct owner of the business
+  // 1. Authoritative check: Business MUST already exist
   const bizDoc = await adminDb.doc(`businesses/${businessId}`).get();
   if (!bizDoc.exists) {
-    // If the business was initialized prior to server credential deployment,
-    // sync and initialize the business document so the authenticated owner is not blocked
-    const now = Date.now();
-    await adminDb.doc(`businesses/${businessId}`).set({
-      id: businessId,
-      name: "Usaha Saya",
-      businessType: "fnb",
-      ownerId: userId,
-      currency: "IDR",
-      timezone: "Asia/Jakarta",
-      status: "active",
-      createdAt: now,
-      updatedAt: now,
-    }, { merge: true });
-
-    await adminDb.doc(`businesses/${businessId}/members/${userId}`).set({
-      id: `mem_${userId}`,
-      userId,
-      businessId,
-      displayName: 'Pemilik Usaha',
-      role: 'owner',
-      branchIds: ['CAB-01'],
-      permissions: [
-        'products.read', 'products.cost.read', 'products.create', 'products.update', 'products.delete',
-        'sales.create', 'sales.read', 'sales.refund', 'inventory.read', 'inventory.receive', 'inventory.adjust',
-        'approvals.manage', 'employees.create', 'employees.manage', 'finance.read', 'reports.read',
-        'business.settings.manage', 'shift.manage'
-      ],
-      status: 'active',
-      joinedAt: now,
-    }, { merge: true });
-
-    return {
-      isOwner: true,
-      role: 'owner',
-      permissions: [
-        'products.read', 'products.cost.read', 'products.create', 'products.update', 'products.delete',
-        'sales.create', 'sales.read', 'sales.refund', 'inventory.read', 'inventory.receive', 'inventory.adjust',
-        'approvals.manage', 'employees.create', 'employees.manage', 'finance.read', 'reports.read',
-        'business.settings.manage', 'shift.manage'
-      ],
-      branchIds: ['CAB-01'],
-      displayName: 'Pemilik Usaha',
-    };
+    // Pure authorization guard: NEVER create business documents or grant ownership on missing businesses!
+    throw new AuthError(404, `Akses ditolak: Unit bisnis '${businessId}' tidak ditemukan.`);
   }
 
   const bizData = bizDoc.data();
+  if (bizData?.status === 'inactive' || bizData?.status === 'suspended') {
+    throw new AuthError(403, "Akses ditolak: Unit bisnis ini sedang dinonaktifkan.");
+  }
+
+  // Check if caller is the authoritative direct owner of this business
   if (bizData?.ownerId === userId) {
     return {
       isOwner: true,
@@ -133,15 +96,15 @@ export async function requireBusinessMembership(businessId: string, userId: stri
         'approvals.manage', 'employees.create', 'employees.manage', 'finance.read', 'reports.read',
         'business.settings.manage', 'shift.manage'
       ],
-      branchIds: [],
+      branchIds: ['*'], // Owner explicitly has access to all branches
       displayName: bizData.ownerName || 'Pemilik Usaha',
     };
   }
 
-  // 2. Check if user is an authorized member in businesses/{businessId}/members/{userId}
+  // 2. Check if user is an active registered member in businesses/{businessId}/members/{userId}
   const memberDoc = await adminDb.doc(`businesses/${businessId}/members/${userId}`).get();
   if (!memberDoc.exists) {
-    throw new AuthError(403, "Akses ditolak: Anda bukan anggota resmi dari bisnis ini (Cross-tenant access blocked).");
+    throw new AuthError(403, "Akses ditolak: Anda bukan anggota resmi dari unit bisnis ini (Cross-tenant access blocked).");
   }
 
   const memberData = memberDoc.data() as BusinessMember;
@@ -181,7 +144,7 @@ export async function requireBusinessPermission(
 }
 
 /**
- * Validates that the user has access to a specific branch
+ * Validates that the targeted branch exists, is active, and the user is authorized for it
  */
 export async function requireBranchAccess(
   businessId: string,
@@ -190,12 +153,32 @@ export async function requireBranchAccess(
 ): Promise<BusinessMembershipResult> {
   const membership = await requireBusinessMembership(businessId, userId);
 
+  // 1. Authoritative Branch Existence and Status Check
+  const branchDoc = await adminDb.doc(`businesses/${businessId}/branches/${branchId}`).get();
+  if (!branchDoc.exists) {
+    throw new AuthError(404, `Akses ditolak: Cabang '${branchId}' tidak ditemukan pada unit bisnis ini.`);
+  }
+
+  const branchData = branchDoc.data();
+  if (branchData?.active === false) {
+    throw new AuthError(403, `Akses ditolak: Cabang '${branchData?.name || branchId}' sedang dinonaktifkan.`);
+  }
+
+  // 2. Authoritative Branch Authorization Check
   if (membership.isOwner) {
     return membership;
   }
 
-  if (membership.branchIds.length > 0 && !membership.branchIds.includes(branchId)) {
-    throw new AuthError(403, `Akses ditolak: Anda tidak memiliki akses ke cabang '${branchId}'.`);
+  const hasExplicitAllBranches = 
+    membership.branchIds.includes('*') || 
+    membership.branchIds.includes('all');
+
+  if (hasExplicitAllBranches) {
+    return membership;
+  }
+
+  if (!membership.branchIds.includes(branchId)) {
+    throw new AuthError(403, `Akses ditolak: Anda tidak memiliki akses ke cabang '${branchData?.name || branchId}'.`);
   }
 
   return membership;

@@ -18,7 +18,8 @@ service cloud.firestore {
     function isMemberOf(businessId) {
       return isAuthenticated() && (
         isOwnerOf(businessId) ||
-        exists(/databases/$(database)/documents/businesses/$(businessId)/members/$(request.auth.uid))
+        (exists(/databases/$(database)/documents/businesses/$(businessId)/members/$(request.auth.uid)) &&
+         getMemberData(businessId).status == 'active')
       );
     }
 
@@ -30,6 +31,7 @@ service cloud.firestore {
       return isAuthenticated() && (
         isOwnerOf(businessId) ||
         (exists(/databases/$(database)/documents/businesses/$(businessId)/members/$(request.auth.uid)) &&
+         getMemberData(businessId).status == 'active' &&
          getMemberData(businessId).role in ['owner', 'manager'])
       );
     }
@@ -115,11 +117,11 @@ service cloud.firestore {
       }
 
       // Subkoleksi Purchase Order (PO Distributor & Dokumen HPP Modal)
-      // Kasir & waiter dilarang membaca PO; hanya Owner, Manager, dan Warehouse
+      // Kasir, waiter, & gudang dilarang membaca PO langsung; hanya Owner, Manager, dan Accountant
       match /purchaseOrders/{poId} {
         allow read: if isAuthenticated() && (
           isOwnerOf(businessId) || 
-          (isMemberOf(businessId) && getMemberData(businessId).role in ['owner', 'manager', 'warehouse'])
+          (isMemberOf(businessId) && getMemberData(businessId).role in ['owner', 'manager', 'accountant'])
         );
         allow write: if false; // Diterbitkan & diterima via server API berizin
       }

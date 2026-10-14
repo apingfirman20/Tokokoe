@@ -34,10 +34,28 @@ export async function POST(request: Request) {
 
     const staff = staffDoc.data()!;
 
-    // 2. Account Status Check (Suspended & Disabled accounts)
-    if (staff.status === "suspended" || staff.status === "disabled") {
+    // 2. Authoritative Account & Tenant Status Check
+    if (staff.status !== "active") {
       return NextResponse.json(
-        { success: false, message: "Akun karyawan ini telah dinonaktifkan oleh pemilik usaha." },
+        { success: false, message: "Akun karyawan ini tidak aktif atau telah dinonaktifkan." },
+        { status: 403 }
+      );
+    }
+
+    // Verify tenant business existence and active status
+    const bizDoc = await adminDb.doc(`businesses/${staff.businessId}`).get();
+    if (!bizDoc.exists || bizDoc.data()?.status !== "active") {
+      return NextResponse.json(
+        { success: false, message: "Unit bisnis tempat karyawan bertugas tidak aktif atau tidak ditemukan." },
+        { status: 403 }
+      );
+    }
+
+    // Verify membership record existence and active status
+    const memberDoc = await adminDb.doc(`businesses/${staff.businessId}/members/${staff.uid}`).get();
+    if (!memberDoc.exists || memberDoc.data()?.status !== "active") {
+      return NextResponse.json(
+        { success: false, message: "Keanggotaan karyawan pada unit bisnis ini telah dinonaktifkan." },
         { status: 403 }
       );
     }

@@ -6,6 +6,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { useBusiness } from '@/context/BusinessContext';
 import { getNavigationForUser } from '@/lib/modules/registry';
+import { hasPermission } from '@/lib/permissions';
 import { DynamicIcon } from './DynamicIcon';
 import { 
   Store, Coffee, Smartphone, ShoppingBag, 
@@ -44,6 +45,12 @@ export function AppShell({ children }: AppShellProps) {
         user?.permissions
       ) 
     : [];
+
+  const canOpenPos = Boolean(
+    activeBusiness &&
+    hasPermission(user?.memberRole || 'owner', 'sales.create', user?.permissions) &&
+    (!activeBusiness.enabledModules || activeBusiness.enabledModules.includes('core.pos'))
+  );
 
   const getBusinessIcon = (type: string) => {
     switch (type) {
@@ -87,13 +94,15 @@ export function AppShell({ children }: AppShellProps) {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <Link
-            href={activeBusiness ? `/app/${activeBusiness.id}/pos` : '/businesses'}
-            className="flex items-center gap-1 bg-teal-600 text-white text-xs px-2.5 py-1.5 rounded-md font-semibold"
-          >
-            <CircleDollarSign className="w-4 h-4" />
-            <span>POS</span>
-          </Link>
+          {canOpenPos && activeBusiness && (
+            <Link
+              href={`/app/${activeBusiness.id}/pos`}
+              className="flex items-center gap-1 bg-teal-600 text-white text-xs px-2.5 py-1.5 rounded-md font-semibold"
+            >
+              <CircleDollarSign className="w-4 h-4" />
+              <span>POS</span>
+            </Link>
+          )}
         </div>
       </div>
 
@@ -256,7 +265,7 @@ export function AppShell({ children }: AppShellProps) {
 
             <div className="flex items-center gap-3">
               {/* Quick POS Trigger */}
-              {activeBusiness && (
+              {canOpenPos && activeBusiness && (
                 <Link
                   href={`/app/${activeBusiness.id}/pos`}
                   className="flex items-center gap-2 px-3.5 py-2 rounded-lg bg-teal-600 text-white hover:bg-teal-700 transition-colors shadow-sm text-sm font-semibold active:scale-[0.98]"

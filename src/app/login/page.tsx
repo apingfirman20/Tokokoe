@@ -8,7 +8,7 @@ import { Store, User, Lock, Mail, ArrowRight, ShieldCheck, CheckCircle2, Coffee,
 
 export default function LoginPage() {
   const router = useRouter();
-  const { loginAsOwner, loginAsEmployee } = useAuth();
+  const { loginAsOwner, loginAsEmployee, getIdToken } = useAuth();
 
   const [activeTab, setActiveTab] = useState<'owner' | 'employee'>('owner');
 
@@ -19,6 +19,15 @@ export default function LoginPage() {
   // Employee Form States
   const [employeeUsername, setEmployeeUsername] = useState('');
   const [employeePassword, setEmployeePassword] = useState('');
+
+  // Mandatory First-Time Password Change States
+  const [forceChangeData, setForceChangeData] = useState<{
+    uid: string;
+    username: string;
+    businessId: string;
+  } | null>(null);
+  const [newPasswordInput, setNewPasswordInput] = useState('');
+  const [confirmPasswordInput, setConfirmPasswordInput] = useState('');
 
   const [errorMsg, setErrorMsg] = useState('');
   const [loading, setLoading] = useState(false);
@@ -45,9 +54,61 @@ export default function LoginPage() {
     const res = await loginAsEmployee(employeeUsername, employeePassword);
     setLoading(false);
     if (res.success && res.businessId) {
+      if (res.mustChangePassword) {
+        setForceChangeData({
+          uid: res.user?.uid || '',
+          username: employeeUsername,
+          businessId: res.businessId,
+        });
+        return;
+      }
       router.push(`/app/${res.businessId}/pos`);
     } else {
       setErrorMsg(res.error || 'Username atau kata sandi tidak cocok.');
+    }
+  };
+
+  const handleForceChangeSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!forceChangeData) return;
+    setErrorMsg('');
+
+    if (newPasswordInput.length < 6) {
+      setErrorMsg('Kata sandi baru minimal 6 karakter.');
+      return;
+    }
+    if (newPasswordInput !== confirmPasswordInput) {
+      setErrorMsg('Konfirmasi kata sandi baru tidak cocok.');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const token = await getIdToken();
+      const res = await fetch('/api/auth/change-password', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          uid: forceChangeData.uid,
+          username: forceChangeData.username,
+          newPassword: newPasswordInput,
+          businessId: forceChangeData.businessId,
+        }),
+      });
+
+      const data = await res.json();
+      setLoading(false);
+      if (data.success) {
+        router.push(`/app/${forceChangeData.businessId}/pos`);
+      } else {
+        setErrorMsg(data.message || 'Gagal memperbarui kata sandi baru.');
+      }
+    } catch (err: any) {
+      setLoading(false);
+      setErrorMsg(err.message || 'Terjadi kesalahan sistem saat mengganti kata sandi.');
     }
   };
 
@@ -80,40 +141,105 @@ export default function LoginPage() {
 
       <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md relative z-10 px-4 sm:px-0">
         <div className="bg-slate-800/90 backdrop-blur-md py-8 px-6 shadow-2xl rounded-2xl border border-slate-700 sm:px-10">
-          {/* Tab Selector */}
-          <div className="grid grid-cols-2 gap-2 p-1 bg-slate-900/80 rounded-xl mb-6 border border-slate-700/60">
-            <button
-              type="button"
-              onClick={() => { setActiveTab('owner'); setErrorMsg(''); }}
-              className={`py-2 text-xs font-semibold rounded-lg transition-all flex items-center justify-center gap-1.5 ${
-                activeTab === 'owner'
-                  ? 'bg-teal-600 text-white shadow-md'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              <ShieldCheck className="w-4 h-4" />
-              <span>Pemilik (Owner)</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => { setActiveTab('employee'); setErrorMsg(''); }}
-              className={`py-2 text-xs font-semibold rounded-lg transition-all flex items-center justify-center gap-1.5 ${
-                activeTab === 'employee'
-                  ? 'bg-teal-600 text-white shadow-md'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              <User className="w-4 h-4" />
-              <span>Kasir / Karyawan</span>
-            </button>
-          </div>
+          {forceChangeData ? (
+            /* MANDATORY FIRST-TIME PASSWORD CHANGE */
+            <form onSubmit={handleForceChangeSubmit} className="space-y-4">
+              <div className="text-center pb-2">
+                <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-amber-500/20 text-amber-400 mb-2 border border-amber-500/40">
+                  <Lock className="w-6 h-6" />
+                </div>
+                <h2 className="text-lg font-bold text-white">Wajib Ganti Kata Sandi</h2>
+                <p className="text-xs text-slate-400 mt-1">
+                  Akun Anda <strong className="text-teal-400 font-mono">{forceChangeData.username}</strong> memerlukan penggantian kata sandi pertama kali sebelum dapat mengakses sistem kasir.
+                </p>
+              </div>
 
-          {errorMsg && (
-            <div className="mb-4 p-3 rounded-lg bg-rose-950/80 border border-rose-800 text-rose-200 text-xs flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-rose-500 shrink-0" />
-              <span>{errorMsg}</span>
-            </div>
-          )}
+              {errorMsg && (
+                <div className="p-3 rounded-lg bg-rose-950/80 border border-rose-800 text-rose-200 text-xs flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-rose-500 shrink-0" />
+                  <span>{errorMsg}</span>
+                </div>
+              )}
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                  Kata Sandi Baru (Min. 6 Karakter)
+                </label>
+                <div className="relative">
+                  <Lock className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <input
+                    type="password"
+                    required
+                    value={newPasswordInput}
+                    onChange={(e) => setNewPasswordInput(e.target.value)}
+                    placeholder="Minimal 6 karakter"
+                    className="w-full bg-slate-900 text-white text-sm pl-9 pr-3 py-2.5 rounded-lg border border-slate-700 focus:border-teal-500 outline-none transition-colors"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                  Konfirmasi Kata Sandi Baru
+                </label>
+                <div className="relative">
+                  <Lock className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <input
+                    type="password"
+                    required
+                    value={confirmPasswordInput}
+                    onChange={(e) => setConfirmPasswordInput(e.target.value)}
+                    placeholder="Ulangi kata sandi baru"
+                    className="w-full bg-slate-900 text-white text-sm pl-9 pr-3 py-2.5 rounded-lg border border-slate-700 focus:border-teal-500 outline-none transition-colors"
+                  />
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full mt-3 py-3 px-4 rounded-xl bg-teal-600 hover:bg-teal-500 text-white font-semibold text-sm shadow-lg shadow-teal-900/40 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+              >
+                <span>{loading ? 'Menyimpan Kata Sandi...' : 'Simpan & Lanjutkan ke Kasir POS'}</span>
+                <ArrowRight className="w-4 h-4" />
+              </button>
+            </form>
+          ) : (
+            <>
+              {/* Tab Selector */}
+              <div className="grid grid-cols-2 gap-2 p-1 bg-slate-900/80 rounded-xl mb-6 border border-slate-700/60">
+                <button
+                  type="button"
+                  onClick={() => { setActiveTab('owner'); setErrorMsg(''); }}
+                  className={`py-2 text-xs font-semibold rounded-lg transition-all flex items-center justify-center gap-1.5 ${
+                    activeTab === 'owner'
+                      ? 'bg-teal-600 text-white shadow-md'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <ShieldCheck className="w-4 h-4" />
+                  <span>Pemilik (Owner)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setActiveTab('employee'); setErrorMsg(''); }}
+                  className={`py-2 text-xs font-semibold rounded-lg transition-all flex items-center justify-center gap-1.5 ${
+                    activeTab === 'employee'
+                      ? 'bg-teal-600 text-white shadow-md'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <User className="w-4 h-4" />
+                  <span>Kasir / Karyawan</span>
+                </button>
+              </div>
+
+              {errorMsg && (
+                <div className="mb-4 p-3 rounded-lg bg-rose-950/80 border border-rose-800 text-rose-200 text-xs flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-rose-500 shrink-0" />
+                  <span>{errorMsg}</span>
+                </div>
+              )}
 
           {activeTab === 'owner' ? (
             /* OWNER FORM */
@@ -253,7 +379,9 @@ export default function LoginPage() {
               )}
             </form>
           )}
-        </div>
+        </>
+      )}
+    </div>
 
         <div className="mt-4 text-center">
           <p className="text-xs text-slate-500">

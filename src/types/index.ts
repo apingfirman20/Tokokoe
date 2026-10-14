@@ -51,7 +51,7 @@ export interface Business {
   address: string;
   phone: string;
   enabledModules: string[];
-  status: 'active' | 'suspended';
+  status: 'active' | 'suspended' | 'inactive';
   createdAt: number;
   updatedAt: number;
 }

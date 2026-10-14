@@ -8,6 +8,7 @@ import {
   requireBranchAccess, 
   handleAuthApiError 
 } from "@/lib/server/auth-guard";
+import { canReadCostPrice, sanitizePurchaseOrderDto } from "@/lib/server/cost-protection";
 
 const poItemSchema = z.object({
   brand: z.string().min(1),
@@ -87,9 +88,12 @@ export async function POST(request: Request) {
     // Save to Firestore
     await adminDb.doc(`businesses/${businessId}/purchaseOrders/${poId}`).set(newPO);
 
+    const allowedCost = canReadCostPrice(membership.role, membership.permissions);
+    const sanitizedPO = sanitizePurchaseOrderDto(newPO, allowedCost);
+
     return NextResponse.json({
       success: true,
-      purchaseOrder: newPO,
+      purchaseOrder: sanitizedPO,
       message: `Purchase Order ${poNumber} berhasil diterbitkan.`
     });
   } catch (error) {
