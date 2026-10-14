@@ -1,16 +1,16 @@
 'use client';
 
-import React, { useState, use } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useBusiness } from '@/context/BusinessContext';
 import { useAuth } from '@/context/AuthContext';
-import { UserRole } from '@/types';
+import { UserRole, BusinessMember } from '@/types';
 import { 
   Users, Plus, Shield, UserCheck, Key, 
-  MapPin, X, Check, AlertCircle, Copy 
+  MapPin, X, Check, AlertCircle, RefreshCw, Edit2, Loader2, UserX 
 } from 'lucide-react';
 
 export default function EmployeesPage() {
-  const { members, branches, addEmployee, activeBusiness } = useBusiness();
+  const { members, branches, addEmployee, updateEmployee, reloadMembers, activeBusiness } = useBusiness();
   const { user, getIdToken } = useAuth();
 
   const [showAddModal, setShowAddModal] = useState(false);
@@ -23,13 +23,76 @@ export default function EmployeesPage() {
   const [errorMsg, setErrorMsg] = useState('');
   const [successInfo, setSuccessInfo] = useState<{ username: string; pass: string } | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isReloading, setIsReloading] = useState(false);
+
+  // Edit Employee State
+  const [editingMember, setEditingMember] = useState<BusinessMember | null>(null);
+  const [editDisplayName, setEditDisplayName] = useState('');
+  const [editRole, setEditRole] = useState<UserRole>('cashier');
+  const [editBranches, setEditBranches] = useState<string[]>([]);
+  const [editStatus, setEditStatus] = useState<'active' | 'inactive'>('active');
+  const [editErrorMsg, setEditErrorMsg] = useState('');
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
 
   // Reset Password State for Staff
-  const [resetTargetMember, setResetTargetMember] = useState<any | null>(null);
+  const [resetTargetMember, setResetTargetMember] = useState<BusinessMember | null>(null);
   const [newPasswordForReset, setNewPasswordForReset] = useState('');
   const [resetErrorMsg, setResetErrorMsg] = useState('');
   const [resetSuccessMsg, setResetSuccessMsg] = useState('');
   const [isResettingPassword, setIsResettingPassword] = useState(false);
+
+  const handleReload = async () => {
+    setIsReloading(true);
+    try {
+      await reloadMembers();
+    } finally {
+      setIsReloading(false);
+    }
+  };
+
+  const handleOpenEdit = (m: BusinessMember) => {
+    setEditingMember(m);
+    setEditDisplayName(m.displayName);
+    setEditRole(m.role);
+    setEditBranches(m.branchIds || []);
+    setEditStatus(m.status);
+    setEditErrorMsg('');
+  };
+
+  const handleSaveEditSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingMember) return;
+    setEditErrorMsg('');
+
+    if (!editDisplayName.trim()) {
+      setEditErrorMsg('Nama tampilan wajib diisi.');
+      return;
+    }
+    if (editBranches.length === 0) {
+      setEditErrorMsg('Minimal pilih satu cabang penugasan.');
+      return;
+    }
+
+    setIsSavingEdit(true);
+    try {
+      const res = await updateEmployee(editingMember.id, {
+        displayName: editDisplayName.trim(),
+        role: editRole,
+        branchIds: editBranches,
+        status: editStatus,
+      });
+
+      if (res.success) {
+        setEditingMember(null);
+      } else {
+        setEditErrorMsg(res.error || 'Gagal memperbarui data karyawan.');
+      }
+    } catch (err: any) {
+      setEditErrorMsg(err.message || 'Terjadi kesalahan sistem.');
+    } finally {
+      setIsSavingEdit(false);
+    }
+  };
 
   const handleResetPasswordSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -62,7 +125,7 @@ export default function EmployeesPage() {
       const data = await res.json();
       setIsResettingPassword(false);
       if (data.success) {
-        setResetSuccessMsg(`Kata sandi untuk ${resetTargetMember.displayName} berhasil direset. Sesi lama telah dicabut.`);
+        setResetSuccessMsg(`Kata sandi untuk ${resetTargetMember.displayName} berhasil direset. Sesi lama telah dicabut secara paksa.`);
       } else {
         setResetErrorMsg(data.message || 'Gagal mereset kata sandi.');
       }
@@ -79,7 +142,7 @@ export default function EmployeesPage() {
   const handleOpenAdd = () => {
     setName('');
     setUsernamePrefix('');
-    setRole('cashier');
+    setRole(activeBusiness?.businessType === 'fnb' ? 'waiter' : 'cashier');
     const defaultBranchIds = branches.length > 0 
       ? branches.map(b => b.id) 
       : ['CAB-01'];
@@ -128,7 +191,6 @@ export default function EmployeesPage() {
     }
   };
 
-
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -137,17 +199,29 @@ export default function EmployeesPage() {
             Manajemen Karyawan & Hak Akses
           </h1>
           <p className="text-xs text-slate-500 mt-1">
-            Kelola staf, kasir, kredensial username login, dan cabang penugasan ({members.length} anggota tim)
+            Kelola staf, peran vertikal, cabang penugasan, dan status aktif ({members.length} anggota tim terdaftar)
           </p>
         </div>
 
-        <button
-          onClick={handleOpenAdd}
-          className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-semibold text-xs shadow-sm transition-all self-start sm:self-auto"
-        >
-          <Plus className="w-4 h-4" />
-          <span>+ Tambah Akun Karyawan</span>
-        </button>
+        <div className="flex items-center gap-2 self-start sm:self-auto">
+          <button
+            onClick={handleReload}
+            disabled={isReloading}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs transition-all disabled:opacity-50"
+            title="Reload dari Database Server"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isReloading ? 'animate-spin' : ''}`} />
+            <span>Reload</span>
+          </button>
+
+          <button
+            onClick={handleOpenAdd}
+            className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-semibold text-xs shadow-sm transition-all"
+          >
+            <Plus className="w-4 h-4" />
+            <span>+ Tambah Akun Karyawan</span>
+          </button>
+        </div>
       </div>
 
       {/* Security Architecture Note */}
@@ -177,10 +251,15 @@ export default function EmployeesPage() {
             </thead>
             <tbody className="divide-y divide-slate-100">
               {members.map((mem) => {
-                const assignedBranchNames = branches
-                  .filter(b => mem.branchIds.includes(b.id))
-                  .map(b => b.name)
+                const assignedBranchNames = (mem.branchIds || [])
+                  .map(bId => {
+                    if (bId === '*' || bId === 'all') return 'Semua Cabang';
+                    const br = branches.find(b => b.id === bId);
+                    return br ? br.name : bId;
+                  })
                   .join(', ') || 'Semua Cabang';
+
+                const isActive = mem.status === 'active';
 
                 return (
                   <tr key={mem.id} className="hover:bg-slate-50/70 transition-colors">
@@ -203,25 +282,42 @@ export default function EmployeesPage() {
                       </div>
                     </td>
                     <td className="py-3 px-4 text-center">
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                        {mem.status}
-                      </span>
+                      {isActive ? (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                          Aktif
+                        </span>
+                      ) : (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-rose-50 text-rose-700 border border-rose-200">
+                          Nonaktif
+                        </span>
+                      )}
                     </td>
                     <td className="py-3 px-4 text-center">
                       {mem.role !== 'owner' ? (
-                        <button
-                          onClick={() => {
-                            setResetTargetMember(mem);
-                            setNewPasswordForReset('');
-                            setResetErrorMsg('');
-                            setResetSuccessMsg('');
-                          }}
-                          className="p-1 px-2 rounded-lg bg-slate-100 hover:bg-teal-50 text-slate-600 hover:text-teal-700 text-[10px] font-semibold border border-slate-200 hover:border-teal-300 inline-flex items-center gap-1 transition-colors"
-                          title="Reset Kata Sandi Karyawan"
-                        >
-                          <Key className="w-3 h-3 text-teal-600" />
-                          <span>Reset Sandi</span>
-                        </button>
+                        <div className="flex items-center justify-center gap-1">
+                          <button
+                            onClick={() => handleOpenEdit(mem)}
+                            className="p-1 px-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] font-semibold border border-slate-200 inline-flex items-center gap-1 transition-colors"
+                            title="Edit Role, Cabang, dan Status"
+                          >
+                            <Edit2 className="w-3 h-3 text-slate-600" />
+                            <span>Edit</span>
+                          </button>
+
+                          <button
+                            onClick={() => {
+                              setResetTargetMember(mem);
+                              setNewPasswordForReset('');
+                              setResetErrorMsg('');
+                              setResetSuccessMsg('');
+                            }}
+                            className="p-1 px-2 rounded-lg bg-slate-100 hover:bg-teal-50 text-slate-600 hover:text-teal-700 text-[10px] font-semibold border border-slate-200 hover:border-teal-300 inline-flex items-center gap-1 transition-colors"
+                            title="Reset Kata Sandi Karyawan"
+                          >
+                            <Key className="w-3 h-3 text-teal-600" />
+                            <span>Reset Sandi</span>
+                          </button>
+                        </div>
                       ) : (
                         <span className="text-[10px] text-slate-400 italic">Owner</span>
                       )}
@@ -233,6 +329,134 @@ export default function EmployeesPage() {
           </table>
         </div>
       </div>
+
+      {/* Edit Employee Modal */}
+      {editingMember && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200">
+            <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <Edit2 className="w-4 h-4 text-teal-600" />
+                <h3 className="font-bold text-sm text-slate-900">Edit Data Staf: {editingMember.displayName}</h3>
+              </div>
+              <button 
+                onClick={() => setEditingMember(null)} 
+                disabled={isSavingEdit}
+                className="text-slate-400 hover:text-slate-700"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEditSubmit} className="space-y-4">
+              {editErrorMsg && (
+                <div className="p-3 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-xs">
+                  {editErrorMsg}
+                </div>
+              )}
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Nama Tampilan Karyawan <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={editDisplayName}
+                  onChange={(e) => setEditDisplayName(e.target.value)}
+                  className="w-full text-xs p-2.5 rounded-xl border border-slate-300 outline-none focus:border-teal-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Peran (Role)
+                  </label>
+                  <select
+                    value={editRole}
+                    onChange={(e) => setEditRole(e.target.value as UserRole)}
+                    className="w-full text-xs p-2.5 rounded-xl border border-slate-300 outline-none"
+                  >
+                    <option value="cashier">Kasir (Cashier)</option>
+                    <option value="waiter">Pramusaji (Waiter - F&B)</option>
+                    <option value="kitchen">Dapur (Kitchen - F&B)</option>
+                    <option value="manager">Manager Toko</option>
+                    <option value="warehouse">Gudang (Warehouse)</option>
+                    <option value="accountant">Akuntan / Finance</option>
+                    <option value="technician">Teknisi Servis (Phone)</option>
+                    <option value="courier">Kurir Pengantaran</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Status Akun
+                  </label>
+                  <select
+                    value={editStatus}
+                    onChange={(e) => setEditStatus(e.target.value as 'active' | 'inactive')}
+                    className="w-full text-xs p-2.5 rounded-xl border border-slate-300 outline-none font-semibold"
+                  >
+                    <option value="active">Aktif</option>
+                    <option value="inactive">Nonaktif (Blokir Akses)</option>
+                  </select>
+                </div>
+              </div>
+
+              {editStatus === 'inactive' && (
+                <div className="p-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-[11px] leading-relaxed">
+                  ⚠️ <strong>Perhatian:</strong> Menonaktifkan akun akan langsung mencabut sesi aktif staf ini di seluruh perangkat. Karyawan tidak akan dapat login lagi.
+                </div>
+              )}
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                  Tugaskan ke Cabang
+                </label>
+                <div className="space-y-1.5 max-h-36 overflow-y-auto p-2 rounded-xl bg-slate-50 border border-slate-200">
+                  {branches.map((b) => (
+                    <label key={b.id} className="flex items-center gap-2 text-xs text-slate-700">
+                      <input
+                        type="checkbox"
+                        checked={editBranches.includes(b.id)}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setEditBranches(prev => [...prev, b.id]);
+                          } else {
+                            setEditBranches(prev => prev.filter(id => id !== b.id));
+                          }
+                        }}
+                        className="rounded text-teal-600"
+                      />
+                      <span>{b.name} ({b.code})</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div className="pt-3 border-t border-slate-100 flex justify-end gap-2">
+                <button
+                  type="button"
+                  disabled={isSavingEdit}
+                  onClick={() => setEditingMember(null)}
+                  className="px-4 py-2 rounded-xl text-slate-600 text-xs font-semibold hover:bg-slate-100 disabled:opacity-50"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingEdit}
+                  className="px-5 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs disabled:opacity-60 flex items-center gap-1.5 shadow-xs"
+                >
+                  {isSavingEdit && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                  <span>{isSavingEdit ? 'Menyimpan...' : 'Simpan Perubahan'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Reset Password Modal */}
       {resetTargetMember && (
@@ -401,15 +625,17 @@ export default function EmployeesPage() {
                     </label>
                     <select
                       value={role}
-                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                      onChange={(e) => setRole(e.target.value as any)}
+                      onChange={(e) => setRole(e.target.value as UserRole)}
                       className="w-full text-xs p-2.5 rounded-xl border border-slate-300 outline-none"
                     >
                       <option value="cashier">Kasir (Cashier)</option>
-                      <option value="manager">Manager / Kepala Toko</option>
-                      <option value="kitchen">Staf Dapur (Kitchen)</option>
+                      <option value="waiter">Pramusaji (Waiter - F&B)</option>
+                      <option value="kitchen">Dapur (Kitchen - F&B)</option>
+                      <option value="manager">Manager Toko</option>
                       <option value="warehouse">Gudang (Warehouse)</option>
-                      <option value="technician">Teknisi Servis</option>
+                      <option value="accountant">Akuntan / Finance</option>
+                      <option value="technician">Teknisi Servis (Phone)</option>
+                      <option value="courier">Kurir Pengantaran</option>
                     </select>
                   </div>
 
@@ -432,7 +658,7 @@ export default function EmployeesPage() {
                   <label className="block text-xs font-semibold text-slate-700 mb-1.5">
                     Tugaskan ke Cabang
                   </label>
-                  <div className="space-y-1.5">
+                  <div className="space-y-1.5 max-h-36 overflow-y-auto p-2 rounded-xl bg-slate-50 border border-slate-200">
                     {branches.map((b) => (
                       <label key={b.id} className="flex items-center gap-2 text-xs text-slate-700">
                         <input
@@ -465,11 +691,11 @@ export default function EmployeesPage() {
                   <button
                     type="submit"
                     disabled={isSubmitting}
-                    className="px-5 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-1.5"
+                    className="px-5 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-1.5 shadow-xs"
                   >
                     {isSubmitting ? (
                       <>
-                        <span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin inline-block"></span>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
                         <span>Menyimpan...</span>
                       </>
                     ) : (

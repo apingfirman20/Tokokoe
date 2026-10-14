@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, use } from 'react';
+import React, { useState } from 'react';
 import { useBusiness } from '@/context/BusinessContext';
 import { useAuth } from '@/context/AuthContext';
 import { Product } from '@/types';
@@ -8,16 +8,17 @@ import { formatRupiah } from '@/lib/utils';
 import { hasPermission } from '@/lib/permissions';
 import { validateProductBarcode, checkDuplicateBarcode, detectBarcodeType } from '@/lib/validation/barcode';
 import { 
-  Package, Plus, Search, Edit2, CheckCircle2, 
-  X, AlertTriangle, Coffee, Smartphone, ShoppingBag, AlertCircle 
+  Package, Plus, Search, Edit2, Archive, CheckCircle2, 
+  X, AlertTriangle, Coffee, Smartphone, ShoppingBag, AlertCircle, Loader2, RotateCcw 
 } from 'lucide-react';
 
 export default function ProductsPage() {
-  const { products, activeBusiness, createProduct, updateProduct } = useBusiness();
+  const { products, activeBusiness, createProduct, updateProduct, archiveProduct } = useBusiness();
   const { user } = useAuth();
 
   const [search, setSearch] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('Semua');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'archived'>('active');
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
 
@@ -30,13 +31,21 @@ export default function ProductsPage() {
   const [barcode, setBarcode] = useState('');
   const [sku, setSku] = useState('');
   const [modalError, setModalError] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
+  const [actionFeedback, setActionFeedback] = useState<string | null>(null);
 
   const canViewCostPrice = hasPermission(user?.memberRole || 'owner', 'products.cost.read', user?.permissions);
-  const canManageProducts = hasPermission(user?.memberRole || 'owner', 'products.create', user?.permissions);
+  const canCreate = hasPermission(user?.memberRole || 'owner', 'products.create', user?.permissions);
+  const canEdit = hasPermission(user?.memberRole || 'owner', 'products.update', user?.permissions);
+  const canArchive = hasPermission(user?.memberRole || 'owner', 'products.delete', user?.permissions);
 
   const categories = ['Semua', ...Array.from(new Set(products.map(p => p.category)))];
 
   const filtered = products.filter(p => {
+    // Status Filter (active vs archived)
+    if (statusFilter === 'active' && p.isActive === false) return false;
+    if (statusFilter === 'archived' && p.isActive !== false) return false;
+
     const matchCat = selectedCategory === 'Semua' || p.category === selectedCategory;
     const matchSearch = p.name.toLowerCase().includes(search.toLowerCase()) ||
       (p.barcode && p.barcode.includes(search)) ||
@@ -70,21 +79,40 @@ export default function ProductsPage() {
     setShowAddModal(true);
   };
 
-  const handleSaveProduct = (e: React.FormEvent) => {
+  const handleSaveProduct = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim()) return;
     setModalError('');
+
+    const cleanName = name.trim();
+    if (!cleanName) {
+      setModalError('Nama produk wajib diisi.');
+      return;
+    }
+
+    // 1. Validate integer Rupiah and non-negative values
+    if (!Number.isInteger(sellingPrice) || sellingPrice < 0) {
+      setModalError('Harga jual harus berupa nominal Rupiah bulat dan tidak boleh negatif.');
+      return;
+    }
+    if (!Number.isInteger(costPrice) || costPrice < 0) {
+      setModalError('HPP harus berupa nominal Rupiah bulat dan tidak boleh negatif.');
+      return;
+    }
+    if (!Number.isInteger(stockQty) || stockQty < 0) {
+      setModalError('Jumlah stok harus berupa bilangan bulat dan tidak boleh negatif.');
+      return;
+    }
 
     const cleanBarcode = barcode.trim();
     if (cleanBarcode) {
-      // 1. Check duplicate barcode within current business
+      // Check duplicate barcode within current business
       const duplicate = checkDuplicateBarcode(products, cleanBarcode, editingProduct?.id);
       if (duplicate.isDuplicate && duplicate.conflictingProduct) {
         setModalError(`Barcode "${cleanBarcode}" sudah digunakan oleh produk lain ("${duplicate.conflictingProduct.name}").`);
         return;
       }
 
-      // 2. Validate format (accepts EAN-13, EAN-8, or internal alphanumeric)
+      // Validate format (accepts EAN-13, EAN-8, or internal alphanumeric)
       const val = validateProductBarcode(cleanBarcode);
       if (!val.valid) {
         setModalError(val.error || 'Format barcode tidak valid.');
@@ -92,30 +120,90 @@ export default function ProductsPage() {
       }
     }
 
-    if (editingProduct) {
-      updateProduct(editingProduct.id, {
-        name,
-        category,
-        sellingPrice,
-        costPrice: canViewCostPrice ? costPrice : editingProduct.costPrice,
-        stockQty,
-        barcode: cleanBarcode || undefined,
-        sku: sku.trim() || undefined,
-      });
-    } else {
-      createProduct({
-        name,
-        category,
-        sellingPrice,
-        costPrice,
-        stockQty,
-        barcode: cleanBarcode || undefined,
-        sku: sku.trim() || undefined,
-        trackStock: true,
-      });
+    const cleanSku = sku.trim();
+
+    setIsSaving(true);
+    try {
+      if (editingProduct) {
+        // Explicitly clear barcode / SKU by passing null if cleared by user
+        const res = await updateProduct(editingProduct.id, {
+          name: cleanName,
+          category: category.trim() || 'Umum',
+          sellingPrice,
+          costPrice: canViewCostPrice ? costPrice : editingProduct.costPrice,
+          stockQty,
+          barcode: cleanBarcode ? cleanBarcode : '',
+          sku: cleanSku ? cleanSku : '',
+        });
+
+        if (!res.success) {
+          setModalError(res.error || 'Gagal memperbarui data produk.');
+          setIsSaving(false);
+          return;
+        }
+
+        setActionFeedback(`✓ Produk "${cleanName}" berhasil diperbarui.`);
+      } else {
+        const res = await createProduct({
+          name: cleanName,
+          category: category.trim() || 'Umum',
+          sellingPrice,
+          costPrice: canViewCostPrice ? costPrice : 0,
+          stockQty,
+          barcode: cleanBarcode || undefined,
+          sku: cleanSku || undefined,
+          trackStock: true,
+          available: true,
+        });
+
+        if (!res.success) {
+          setModalError(res.error || 'Gagal menambahkan produk baru.');
+          setIsSaving(false);
+          return;
+        }
+
+        setActionFeedback(`✓ Produk "${cleanName}" berhasil ditambahkan.`);
+      }
+
+      setTimeout(() => setActionFeedback(null), 3000);
+      setShowAddModal(false);
+    } catch (err: any) {
+      setModalError(err.message || 'Terjadi kesalahan sistem.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleArchive = async (p: Product) => {
+    if (!confirm(`Apakah Anda yakin ingin menonaktifkan/mengarsipkan produk "${p.name}"? Produk ini tidak akan dapat dijual di POS, namun riwayat transaksi tetap aman.`)) {
+      return;
     }
 
-    setShowAddModal(false);
+    try {
+      const res = await archiveProduct(p.id);
+      if (res.success) {
+        setActionFeedback(`✓ Produk "${p.name}" berhasil diarsipkan.`);
+        setTimeout(() => setActionFeedback(null), 3000);
+      } else {
+        alert(res.error || 'Gagal mengarsipkan produk.');
+      }
+    } catch (err: any) {
+      alert(err.message || 'Terjadi kesalahan sistem.');
+    }
+  };
+
+  const handleReactivate = async (p: Product) => {
+    try {
+      const res = await updateProduct(p.id, { isActive: true, available: true });
+      if (res.success) {
+        setActionFeedback(`✓ Produk "${p.name}" berhasil diaktifkan kembali.`);
+        setTimeout(() => setActionFeedback(null), 3000);
+      } else {
+        alert(res.error || 'Gagal mengaktifkan produk.');
+      }
+    } catch (err: any) {
+      alert(err.message || 'Terjadi kesalahan sistem.');
+    }
   };
 
   return (
@@ -126,11 +214,11 @@ export default function ProductsPage() {
             Katalog Produk & Menu
           </h1>
           <p className="text-xs text-slate-500 mt-1">
-            Kelola daftar produk, harga jual, barcode, dan kuantitas inventaris ({products.length} item aktif)
+            Kelola daftar produk, harga jual, barcode, dan kuantitas inventaris ({products.length} total produk)
           </p>
         </div>
 
-        {canManageProducts && (
+        {canCreate && (
           <button
             onClick={handleOpenAdd}
             className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-semibold text-xs shadow-sm transition-all self-start sm:self-auto"
@@ -140,6 +228,13 @@ export default function ProductsPage() {
           </button>
         )}
       </div>
+
+      {actionFeedback && (
+        <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold flex items-center gap-2">
+          <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+          <span>{actionFeedback}</span>
+        </div>
+      )}
 
       {/* Filter and Search Bar */}
       <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs flex flex-wrap items-center justify-between gap-3">
@@ -152,6 +247,34 @@ export default function ProductsPage() {
             placeholder="Cari nama produk, SKU, barcode..."
             className="w-full bg-transparent border-0 outline-none text-xs text-slate-900"
           />
+        </div>
+
+        {/* Status Tab (Aktif vs Diarsipkan) */}
+        <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl">
+          <button
+            onClick={() => setStatusFilter('active')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+              statusFilter === 'active' ? 'bg-white text-teal-800 shadow-2xs' : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            Aktif
+          </button>
+          <button
+            onClick={() => setStatusFilter('archived')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+              statusFilter === 'archived' ? 'bg-white text-teal-800 shadow-2xs' : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            Diarsipkan
+          </button>
+          <button
+            onClick={() => setStatusFilter('all')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+              statusFilter === 'all' ? 'bg-white text-teal-800 shadow-2xs' : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            Semua
+          </button>
         </div>
 
         <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar">
@@ -183,53 +306,97 @@ export default function ProductsPage() {
                 <th className="py-3 px-4 text-right">Harga Jual</th>
                 {canViewCostPrice && <th className="py-3 px-4 text-right">HPP (Modal)</th>}
                 <th className="py-3 px-4 text-center">Stok</th>
+                <th className="py-3 px-4 text-center">Status</th>
                 <th className="py-3 px-4 text-center">Aksi</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {filtered.map((prod) => (
-                <tr key={prod.id} className="hover:bg-slate-50/70 transition-colors">
-                  <td className="py-3 px-4 font-semibold text-slate-900">
-                    {prod.name}
-                  </td>
-                  <td className="py-3 px-4 text-slate-600">
-                    <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-700 text-[10px] font-semibold">
-                      {prod.category}
-                    </span>
-                  </td>
-                  <td className="py-3 px-4 font-mono text-slate-500">
-                    {prod.barcode || prod.sku || '-'}
-                  </td>
-                  <td className="py-3 px-4 text-right font-bold text-slate-900 tabular-nums">
-                    {formatRupiah(prod.sellingPrice)}
-                  </td>
-                  {canViewCostPrice && (
-                    <td className="py-3 px-4 text-right text-slate-500 tabular-nums">
-                      {formatRupiah(prod.costPrice)}
-                    </td>
-                  )}
-                  <td className="py-3 px-4 text-center">
-                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                      prod.stockQty <= 5 
-                        ? 'bg-rose-50 text-rose-700 border border-rose-200' 
-                        : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                    }`}>
-                      {prod.trackStock ? `${prod.stockQty} unit` : 'Tanpa Stok'}
-                    </span>
-                  </td>
-                  <td className="py-3 px-4 text-center">
-                    {canManageProducts && (
-                      <button
-                        onClick={() => handleOpenEdit(prod)}
-                        className="p-1.5 rounded-lg text-slate-400 hover:text-teal-700 hover:bg-slate-100 transition-colors"
-                        title="Edit Produk"
-                      >
-                        <Edit2 className="w-3.5 h-3.5" />
-                      </button>
-                    )}
+              {filtered.length === 0 ? (
+                <tr>
+                  <td colSpan={8} className="py-12 text-center text-slate-400">
+                    Tidak ada produk ditemukan sesuai filter.
                   </td>
                 </tr>
-              ))}
+              ) : (
+                filtered.map((prod) => (
+                  <tr key={prod.id} className="hover:bg-slate-50/70 transition-colors">
+                    <td className="py-3 px-4 font-semibold text-slate-900">
+                      <div>{prod.name}</div>
+                      {prod.isActive === false && (
+                        <span className="text-[10px] text-rose-600 italic">Diarsipkan (tidak dijual)</span>
+                      )}
+                    </td>
+                    <td className="py-3 px-4 text-slate-600">
+                      <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-700 text-[10px] font-semibold">
+                        {prod.category}
+                      </span>
+                    </td>
+                    <td className="py-3 px-4 font-mono text-slate-500">
+                      {prod.barcode || prod.sku || '-'}
+                    </td>
+                    <td className="py-3 px-4 text-right font-bold text-slate-900 tabular-nums">
+                      {formatRupiah(prod.sellingPrice)}
+                    </td>
+                    {canViewCostPrice && (
+                      <td className="py-3 px-4 text-right text-slate-500 tabular-nums">
+                        {formatRupiah(prod.costPrice)}
+                      </td>
+                    )}
+                    <td className="py-3 px-4 text-center">
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                        prod.stockQty <= 5 
+                          ? 'bg-rose-50 text-rose-700 border border-rose-200' 
+                          : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                      }`}>
+                        {prod.trackStock ? `${prod.stockQty} unit` : 'Tanpa Stok'}
+                      </span>
+                    </td>
+                    <td className="py-3 px-4 text-center">
+                      {prod.isActive !== false ? (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                          Aktif
+                        </span>
+                      ) : (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-500 border border-slate-300">
+                          Arsip
+                        </span>
+                      )}
+                    </td>
+                    <td className="py-3 px-4 text-center">
+                      <div className="flex items-center justify-center gap-1">
+                        {canEdit && (
+                          <button
+                            onClick={() => handleOpenEdit(prod)}
+                            className="p-1.5 rounded-lg text-slate-400 hover:text-teal-700 hover:bg-slate-100 transition-colors"
+                            title="Edit Produk"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                        {canArchive && (
+                          prod.isActive !== false ? (
+                            <button
+                              onClick={() => handleArchive(prod)}
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors"
+                              title="Arsipkan / Nonaktifkan Produk"
+                            >
+                              <Archive className="w-3.5 h-3.5" />
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => handleReactivate(prod)}
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 transition-colors"
+                              title="Aktifkan Kembali Produk"
+                            >
+                              <RotateCcw className="w-3.5 h-3.5" />
+                            </button>
+                          )
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>
@@ -243,7 +410,11 @@ export default function ProductsPage() {
               <h3 className="font-bold text-base text-slate-900">
                 {editingProduct ? 'Edit Master Produk' : 'Tambah Produk Baru'}
               </h3>
-              <button onClick={() => setShowAddModal(false)} className="text-slate-400 hover:text-slate-700">
+              <button 
+                onClick={() => setShowAddModal(false)} 
+                disabled={isSaving}
+                className="text-slate-400 hover:text-slate-700 disabled:opacity-50"
+              >
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -282,8 +453,10 @@ export default function ProductsPage() {
                   </label>
                   <input
                     type="number"
+                    min="0"
+                    step="1"
                     value={stockQty}
-                    onChange={(e) => setStockQty(Number(e.target.value))}
+                    onChange={(e) => setStockQty(Math.floor(Number(e.target.value)))}
                     className="w-full text-xs p-2.5 rounded-xl border border-slate-300 outline-none focus:border-teal-500"
                   />
                 </div>
@@ -296,9 +469,11 @@ export default function ProductsPage() {
                   </label>
                   <input
                     type="number"
+                    min="0"
+                    step="1"
                     required
                     value={sellingPrice}
-                    onChange={(e) => setSellingPrice(Number(e.target.value))}
+                    onChange={(e) => setSellingPrice(Math.floor(Number(e.target.value)))}
                     className="w-full text-xs p-2.5 rounded-xl border border-slate-300 outline-none focus:border-teal-500 font-bold"
                   />
                 </div>
@@ -310,8 +485,10 @@ export default function ProductsPage() {
                     </label>
                     <input
                       type="number"
+                      min="0"
+                      step="1"
                       value={costPrice}
-                      onChange={(e) => setCostPrice(Number(e.target.value))}
+                      onChange={(e) => setCostPrice(Math.floor(Number(e.target.value)))}
                       className="w-full text-xs p-2.5 rounded-xl border border-slate-300 outline-none focus:border-teal-500"
                     />
                   </div>
@@ -341,9 +518,10 @@ export default function ProductsPage() {
                     type="text"
                     value={barcode}
                     onChange={(e) => setBarcode(e.target.value)}
-                    placeholder="Contoh: 8996001414001"
+                    placeholder="Kosongkan jika tidak ada barcode"
                     className="w-full font-mono text-xs p-2.5 rounded-xl border border-slate-300 outline-none focus:border-teal-500"
                   />
+                  <span className="text-[10px] text-slate-400 mt-0.5 block">Hapus teks untuk mengosongkan barcode</span>
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">
@@ -356,22 +534,26 @@ export default function ProductsPage() {
                     placeholder="Contoh: KPS-ES-01"
                     className="w-full font-mono text-xs p-2.5 rounded-xl border border-slate-300 outline-none focus:border-teal-500"
                   />
+                  <span className="text-[10px] text-slate-400 mt-0.5 block">Hapus teks untuk mengosongkan SKU</span>
                 </div>
               </div>
 
               <div className="pt-3 border-t border-slate-100 flex justify-end gap-2">
                 <button
                   type="button"
+                  disabled={isSaving}
                   onClick={() => setShowAddModal(false)}
-                  className="px-4 py-2 rounded-xl text-slate-600 text-xs font-semibold"
+                  className="px-4 py-2 rounded-xl text-slate-600 text-xs font-semibold disabled:opacity-50"
                 >
                   Batal
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs"
+                  disabled={isSaving}
+                  className="px-5 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs flex items-center gap-1.5 disabled:opacity-50 shadow-xs"
                 >
-                  Simpan Produk
+                  {isSaving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                  <span>{isSaving ? 'Menyimpan ke Server...' : 'Simpan Produk'}</span>
                 </button>
               </div>
             </form>

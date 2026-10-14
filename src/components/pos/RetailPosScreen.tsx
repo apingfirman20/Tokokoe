@@ -69,6 +69,11 @@ export function RetailPosScreen() {
     }
 
     if (found) {
+      if (found.isActive === false || found.available === false) {
+        setFeedbackMsg(`❌ Produk "${found.name}" nonaktif / diarsipkan.`);
+        setTimeout(() => setFeedbackMsg(''), 3000);
+        return;
+      }
       addToCart(found);
       setBarcodeInput('');
       setFeedbackMsg(`✓ Ditambahkan: ${found.name}`);
@@ -80,6 +85,11 @@ export function RetailPosScreen() {
   };
 
   const addToCart = (product: Product) => {
+    if (product.isActive === false || product.available === false) {
+      setFeedbackMsg(`❌ Produk "${product.name}" sedang nonaktif / diarsipkan.`);
+      setTimeout(() => setFeedbackMsg(''), 2500);
+      return;
+    }
     setCart(prev => {
       const idx = prev.findIndex(item => item.productId === product.id);
       if (idx !== -1) {
@@ -236,27 +246,34 @@ export function RetailPosScreen() {
 
           {/* Quick Product Grid for Touch or Mouse */}
           <div>
-            <h3 className="font-bold text-xs uppercase tracking-wider text-slate-500 mb-2">
-              Katalog Produk Kasir ({products.length} SKU)
-            </h3>
-            <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-3">
-              {products.map((prod) => (
-                <button
-                  key={prod.id}
-                  onClick={() => addToCart(prod)}
-                  className="bg-white p-3 rounded-xl border border-slate-200 shadow-2xs hover:border-emerald-500 hover:shadow-xs text-left transition-all flex flex-col justify-between"
-                >
-                  <div>
-                    <span className="font-semibold text-xs text-slate-900 line-clamp-1">{prod.name}</span>
-                    <span className="font-mono text-[10px] text-slate-400">{prod.barcode || prod.sku}</span>
+            {(() => {
+              const activeProducts = products.filter(p => p.isActive !== false && p.available !== false);
+              return (
+                <>
+                  <h3 className="font-bold text-xs uppercase tracking-wider text-slate-500 mb-2">
+                    Katalog Produk Kasir ({activeProducts.length} SKU)
+                  </h3>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-3">
+                    {activeProducts.map((prod) => (
+                      <button
+                        key={prod.id}
+                        onClick={() => addToCart(prod)}
+                        className="bg-white p-3 rounded-xl border border-slate-200 shadow-2xs hover:border-emerald-500 hover:shadow-xs text-left transition-all flex flex-col justify-between"
+                      >
+                        <div>
+                          <span className="font-semibold text-xs text-slate-900 line-clamp-1">{prod.name}</span>
+                          <span className="font-mono text-[10px] text-slate-400">{prod.barcode || prod.sku}</span>
+                        </div>
+                        <div className="mt-2 pt-1 border-t border-slate-100 flex items-center justify-between">
+                          <span className="font-bold text-xs text-emerald-700 tabular-nums">{formatRupiah(prod.sellingPrice)}</span>
+                          <span className="text-[10px] text-slate-500">Stok: {prod.stockQty}</span>
+                        </div>
+                      </button>
+                    ))}
                   </div>
-                  <div className="mt-2 pt-1 border-t border-slate-100 flex items-center justify-between">
-                    <span className="font-bold text-xs text-emerald-700 tabular-nums">{formatRupiah(prod.sellingPrice)}</span>
-                    <span className="text-[10px] text-slate-500">Stok: {prod.stockQty}</span>
-                  </div>
-                </button>
-              ))}
-            </div>
+                </>
+              );
+            })()}
           </div>
         </div>
 

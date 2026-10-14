@@ -3,8 +3,6 @@ import { adminDb } from "@/lib/firebase/admin";
 import { Business, Branch, BusinessMember } from "@/types";
 import { requireAuthenticatedUser, handleAuthApiError } from "@/lib/server/auth-guard";
 
-export const dynamic = "force-dynamic";
-
 export async function GET(request: Request) {
   try {
     const authUser = await requireAuthenticatedUser(request);

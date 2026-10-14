@@ -138,6 +138,9 @@ export async function POST(request: Request) {
           }
         } else {
           const prodData = prodDoc.data();
+          if (prodData?.isActive === false || prodData?.available === false) {
+            throw new Error(`Produk "${prodData.name || productId}" berstatus tidak aktif atau diarsipkan sehingga tidak dapat dijual.`);
+          }
           if (prodData?.trackStock) {
             const currentStock = prodData.stockQty ?? 0;
             if (currentStock < requestedQty) {
@@ -354,10 +357,15 @@ export async function POST(request: Request) {
       message: "Transaksi penjualan berhasil diselesaikan dan dicatat secara atomik di Cloud Firestore."
     });
   } catch (error: any) {
-    if (error.message?.includes('tidak mencukupi') || error.message?.includes('sudah tidak tersedia')) {
+    if (
+      error.message?.includes('tidak mencukupi') || 
+      error.message?.includes('sudah tidak tersedia') ||
+      error.message?.includes('tidak aktif') ||
+      error.message?.includes('diarsipkan')
+    ) {
       return NextResponse.json(
         { success: false, message: error.message },
-        { status: 409 }
+        { status: 400 }
       );
     }
     return handleAuthApiError(error);

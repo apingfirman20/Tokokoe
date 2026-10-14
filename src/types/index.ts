@@ -8,7 +8,8 @@ export type UserRole =
   | 'accountant' 
   | 'waiter' 
   | 'kitchen' 
-  | 'technician';
+  | 'technician'
+  | 'courier';
 
 export type PermissionKey =
   | 'products.read'
@@ -62,8 +63,11 @@ export interface Branch {
   name: string;
   code: string;
   address: string;
+  phone?: string;
   isMainBranch: boolean;
   active: boolean;
+  createdAt?: number;
+  updatedAt?: number;
 }
 
 export interface BusinessMember {
@@ -77,6 +81,7 @@ export interface BusinessMember {
   permissions: PermissionKey[];
   status: 'active' | 'inactive';
   joinedAt: number;
+  updatedAt?: number;
 }
 
 export interface ProductOption {
@@ -101,6 +106,8 @@ export interface Product {
   sku?: string;
   imageUrl?: string;
   available: boolean;
+  isActive?: boolean;   // Soft-archive flag, defaults to true. Inactive products cannot be sold.
+  archivedAt?: number;
   trackStock: boolean;
   stockQty: number;
   options?: ProductOption[];
@@ -111,6 +118,7 @@ export interface Product {
   storage?: string;
   color?: string;
   condition?: 'new' | 'second_grade_a' | 'second_grade_b';
+  createdAt?: number;
   updatedAt?: number;
 }
 

@@ -10,7 +10,7 @@ import { hasPermission } from '@/lib/permissions';
 import { DynamicIcon } from './DynamicIcon';
 import { 
   Store, Coffee, Smartphone, ShoppingBag, 
-  MapPin, Bell, Search, Cloud, LogOut, 
+  MapPin, Bell, Search, Cloud, CloudOff, LogOut, 
   RotateCcw, Menu, X, Plus, ChevronRight,
   CircleDollarSign, Building2, UserCheck
 } from 'lucide-react';
@@ -28,6 +28,7 @@ export function AppShell({ children }: AppShellProps) {
     activeBusiness, 
     activeBranch, 
     branches, 
+    isOnline,
     switchBusiness, 
     switchBranch, 
     resetToDemoData 
@@ -146,11 +147,25 @@ export function AppShell({ children }: AppShellProps) {
                 </div>
 
                 <div className="flex items-center justify-between text-xs text-slate-400 pt-1 border-t border-slate-700/40">
-                  <div className="flex items-center gap-1.5 truncate">
+                  <div className="flex items-center gap-1.5 truncate flex-1 min-w-0 mr-2">
                     <MapPin className="w-3.5 h-3.5 text-teal-400 shrink-0" />
-                    <span className="truncate">{activeBranch?.name || 'Semua Cabang'}</span>
+                    {branches.length > 1 ? (
+                      <select
+                        value={activeBranch?.id || ''}
+                        onChange={(e) => switchBranch(e.target.value)}
+                        className="bg-transparent text-slate-200 text-xs font-medium outline-none cursor-pointer truncate max-w-[130px]"
+                      >
+                        {branches.filter(b => b.active !== false).map(b => (
+                          <option key={b.id} value={b.id} className="bg-slate-800 text-slate-200">
+                            {b.name}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <span className="truncate">{activeBranch?.name || 'Semua Cabang'}</span>
+                    )}
                   </div>
-                  <span className="text-[10px] px-1.5 py-0.2 rounded bg-slate-700 text-slate-300 uppercase font-semibold">
+                  <span className="text-[10px] px-1.5 py-0.2 rounded bg-slate-700 text-slate-300 uppercase font-semibold shrink-0">
                     {user?.memberRole || 'Owner'}
                   </span>
                 </div>
@@ -257,10 +272,17 @@ export function AppShell({ children }: AppShellProps) {
                 />
               </div>
 
-              <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 text-xs font-semibold border border-emerald-200">
-                <Cloud className="w-3.5 h-3.5" />
-                <span>Sinkron Cloud Online</span>
-              </div>
+              {isOnline ? (
+                <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 text-xs font-semibold border border-emerald-200">
+                  <Cloud className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>Cloud Online</span>
+                </div>
+              ) : (
+                <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-50 text-amber-700 text-xs font-semibold border border-amber-200">
+                  <CloudOff className="w-3.5 h-3.5 text-amber-600" />
+                  <span>Mode Offline</span>
+                </div>
+              )}
             </div>
 
             <div className="flex items-center gap-3">

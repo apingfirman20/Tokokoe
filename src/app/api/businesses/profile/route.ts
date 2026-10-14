@@ -1,0 +1,59 @@
+import { NextResponse } from "next/server";
+import { z } from "zod";
+import { adminDb } from "@/lib/firebase/admin";
+import { Business } from "@/types";
+import { requireAuthenticatedUser, requireBusinessPermission, handleAuthApiError } from "@/lib/server/auth-guard";
+
+const updateProfileSchema = z.object({
+  businessId: z.string().min(1, "businessId wajib diisi"),
+  name: z.string().trim().min(1, "Nama usaha wajib diisi").max(100),
+  phone: z.string().trim().default(""),
+  address: z.string().trim().default(""),
+});
+
+export async function PUT(request: Request) {
+  try {
+    const authUser = await requireAuthenticatedUser(request);
+    const body = await request.json();
+    const parsed = updateProfileSchema.safeParse(body);
+
+    if (!parsed.success) {
+      return NextResponse.json(
+        { success: false, message: parsed.error.issues[0]?.message || "Data profil bisnis tidak valid" },
+        { status: 400 }
+      );
+    }
+
+    const { businessId, name, phone, address } = parsed.data;
+
+    // Check authority: caller must be owner or manager with business.settings.manage
+    await requireBusinessPermission(businessId, authUser.uid, "business.settings.manage");
+
+    const bizRef = adminDb.doc(`businesses/${businessId}`);
+    const bizSnap = await bizRef.get();
+
+    if (!bizSnap.exists) {
+      return NextResponse.json({ success: false, message: "Bisnis tidak ditemukan." }, { status: 404 });
+    }
+
+    const updates = {
+      name,
+      phone,
+      address,
+      updatedAt: Date.now(),
+    };
+
+    await bizRef.update(updates);
+
+    const updatedSnap = await bizRef.get();
+    const updatedBiz = { id: updatedSnap.id, ...updatedSnap.data() } as Business;
+
+    return NextResponse.json({
+      success: true,
+      business: updatedBiz,
+      message: "Profil usaha berhasil diperbarui dan tersimpan di server.",
+    });
+  } catch (error) {
+    return handleAuthApiError(error);
+  }
+}

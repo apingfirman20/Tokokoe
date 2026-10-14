@@ -50,9 +50,10 @@ export function FnBPosScreen() {
   const [shiftActualClosingCash, setShiftActualClosingCash] = useState<number>(0);
   const [shiftNotes, setShiftNotes] = useState('');
 
-  // Filter products by category & search
+  // Filter products by category & search (excluding archived/inactive)
   const categories = ['Semua', 'Coffee Base', 'Non-Coffee', 'Signature', 'Pastry & Bakery', 'Makanan Berat'];
   const filteredProducts = products.filter(p => {
+    if (p.isActive === false || p.available === false) return false;
     const matchCategory = selectedCategory === 'Semua' || p.category === selectedCategory;
     const matchSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase());
     return matchCategory && matchSearch;
@@ -66,6 +67,10 @@ export function FnBPosScreen() {
 
   // Cart Actions
   const addToCart = (product: Product) => {
+    if (product.isActive === false || product.available === false) {
+      alert(`Produk "${product.name}" sedang nonaktif / diarsipkan.`);
+      return;
+    }
     setCart(prev => {
       const existing = prev.find(item => item.productId === product.id);
       if (existing) {

@@ -69,6 +69,9 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<UserRole, PermissionKey[]> = {
     'inventory.read',
     'sales.create',
   ],
+  courier: [
+    'sales.read',
+  ],
 };
 
 export function hasPermission(

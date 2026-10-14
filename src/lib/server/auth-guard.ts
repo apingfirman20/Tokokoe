@@ -44,13 +44,18 @@ export async function requireAuthenticatedUser(request: Request): Promise<Authen
   } catch (error: any) {
     // In test environment, support deterministic test tokens
     if (process.env.NODE_ENV === "test" && token.startsWith("test_token_")) {
-      const parts = token.split("_");
+      const raw = token.startsWith("test_token__") ? token.slice("test_token__".length) : token.slice("test_token_".length);
+      const delimiter = token.startsWith("test_token__") ? "__" : "_";
+      const parts = raw.split(delimiter);
+      const uid = parts[0] || "usr_test";
+      const role = parts[1] || "owner";
+      const businessId = parts[2] || "biz_test";
       return {
-        uid: parts[2] || "usr_test",
-        email: `${parts[2] || "usr_test"}@test.local`,
-        role: parts[3] || "owner",
-        businessId: parts[4] || "biz_test",
-        token: { uid: parts[2] || "usr_test" },
+        uid,
+        email: `${uid}@test.local`,
+        role,
+        businessId,
+        token: { uid, role, businessId },
       };
     }
     throw new AuthError(401, `Akses ditolak: Sesi autentikasi tidak valid atau telah kedaluwarsa (${error.message || 'Token verification failed'}).`);

@@ -37,10 +37,17 @@ interface BusinessContextType {
   cashSessions: CashSession[];
   switchBusiness: (businessId: string) => void;
   switchBranch: (branchId: string) => void;
+  isOnline: boolean;
   createBusiness: (name: string, businessType: BusinessType, address: string, phone: string) => Promise<Business>;
-  createBranch: (name: string, address: string) => Branch;
-  createProduct: (data: Partial<Product>) => Product;
-  updateProduct: (productId: string, updates: Partial<Product>) => void;
+  updateBusinessProfile: (businessId: string, updates: { name: string; address?: string; phone?: string }) => Promise<{ success: boolean; business?: Business; error?: string }>;
+  createBranch: (name: string, address: string, phone?: string) => Promise<{ success: boolean; branch?: Branch; error?: string }>;
+  updateBranch: (branchId: string, updates: Partial<Branch>) => Promise<{ success: boolean; branch?: Branch; error?: string }>;
+  deactivateBranch: (branchId: string) => Promise<{ success: boolean; error?: string }>;
+  createProduct: (data: Partial<Product>) => Promise<{ success: boolean; product?: Product; error?: string }>;
+  updateProduct: (productId: string, updates: Partial<Product>) => Promise<{ success: boolean; product?: Product; error?: string }>;
+  archiveProduct: (productId: string) => Promise<{ success: boolean; error?: string }>;
+  updateEmployee: (memberId: string, updates: { displayName?: string; role?: UserRole; branchIds?: string[]; status?: 'active' | 'inactive'; permissions?: PermissionKey[] }) => Promise<{ success: boolean; member?: BusinessMember; error?: string }>;
+  reloadMembers: () => Promise<void>;
   processCheckout: (payload: {
     lineItems: CartLineItem[];
     subtotal: number;
@@ -117,6 +124,20 @@ export function BusinessProvider({ children }: { children: React.ReactNode }) {
   const [activeBusinessId, setActiveBusinessId] = useState<string | null>(null);
   const [activeBranchId, setActiveBranchId] = useState<string | null>(null);
   const isCheckingOutRef = useRef(false);
+  const [isOnline, setIsOnline] = useState<boolean>(
+    typeof navigator !== 'undefined' ? navigator.onLine : true
+  );
+
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
 
   const reloadData = useCallback(() => {
     if (user?.uid) {
@@ -219,44 +240,94 @@ export function BusinessProvider({ children }: { children: React.ReactNode }) {
       }
 
       setStoreData((prev) => {
-        const next = { ...prev };
         let hasChanges = false;
+        let newProducts = prev.products;
+        let newBranches = prev.branches;
+        let newMembers = prev.members;
+        let newSales = prev.sales;
+        let newImeiUnits = prev.imeiUnits;
+        let newStockAdjustments = prev.stockAdjustments;
+        let newPurchaseOrders = prev.purchaseOrders;
+        let newImeiHistories = prev.imeiHistories;
+        let newCashSessions = prev.cashSessions;
 
-        if (updates.products && updates.products.length > 0) {
-          const otherProducts = prev.products.filter(p => p.businessId !== activeBusinessId);
-          next.products = [...otherProducts, ...updates.products];
+        if (updates.products !== undefined) {
+          const other = prev.products.filter(p => p.businessId !== activeBusinessId);
+          newProducts = [...other, ...updates.products];
           hasChanges = true;
         }
-        if (updates.sales && updates.sales.length > 0) {
+
+        if (updates.branches !== undefined) {
+          const other = prev.branches.filter(b => b.businessId !== activeBusinessId);
+          newBranches = [...other, ...updates.branches];
+          hasChanges = true;
+        }
+
+        if (updates.members !== undefined) {
+          const other = prev.members.filter(m => m.businessId !== activeBusinessId);
+          newMembers = [...other, ...updates.members];
+          hasChanges = true;
+        }
+
+        if (updates.sales !== undefined) {
+          const other = prev.sales.filter(s => s.businessId !== activeBusinessId);
+          // Deduplicate sales by id
           const saleMap = new Map<string, Sale>();
           updates.sales.forEach(s => saleMap.set(s.id, s));
-          prev.sales.forEach(s => {
+          other.forEach(s => {
             if (!saleMap.has(s.id)) saleMap.set(s.id, s);
           });
-          next.sales = Array.from(saleMap.values()).sort((a, b) => b.createdAt - a.createdAt);
-          hasChanges = true;
-        }
-        if (updates.imeiUnits && updates.imeiUnits.length > 0) {
-          next.imeiUnits = updates.imeiUnits;
-          hasChanges = true;
-        }
-        if (updates.stockAdjustments && updates.stockAdjustments.length > 0) {
-          next.stockAdjustments = updates.stockAdjustments;
-          hasChanges = true;
-        }
-        if (updates.purchaseOrders && updates.purchaseOrders.length > 0) {
-          next.purchaseOrders = updates.purchaseOrders;
-          hasChanges = true;
-        }
-        if (updates.imeiHistories && updates.imeiHistories.length > 0) {
-          next.imeiHistories = updates.imeiHistories;
+          newSales = Array.from(saleMap.values()).sort((a, b) => b.createdAt - a.createdAt);
           hasChanges = true;
         }
 
-        if (hasChanges) {
-          // Never persist cost price or confidential supplier documents to unauthorized user localStorage
-          saveStore(next, user?.uid, !isCostAllowed);
+        if (updates.imeiUnits !== undefined) {
+          const other = prev.imeiUnits.filter(u => u.businessId !== activeBusinessId);
+          newImeiUnits = [...other, ...updates.imeiUnits];
+          hasChanges = true;
         }
+
+        if (updates.stockAdjustments !== undefined) {
+          const other = (prev.stockAdjustments || []).filter(a => a.businessId !== activeBusinessId);
+          newStockAdjustments = [...other, ...updates.stockAdjustments];
+          hasChanges = true;
+        }
+
+        if (updates.purchaseOrders !== undefined) {
+          const other = (prev.purchaseOrders || []).filter(po => po.businessId !== activeBusinessId);
+          newPurchaseOrders = [...other, ...updates.purchaseOrders];
+          hasChanges = true;
+        }
+
+        if (updates.imeiHistories !== undefined) {
+          const other = (prev.imeiHistories || []).filter(h => h.businessId !== activeBusinessId);
+          newImeiHistories = [...other, ...updates.imeiHistories];
+          hasChanges = true;
+        }
+
+        if (updates.cashSessions !== undefined) {
+          const other = (prev.cashSessions || []).filter(cs => cs.businessId !== activeBusinessId);
+          newCashSessions = [...other, ...updates.cashSessions];
+          hasChanges = true;
+        }
+
+        if (!hasChanges) return prev;
+
+        const next: AppStoreData = {
+          ...prev,
+          products: newProducts,
+          branches: newBranches,
+          members: newMembers,
+          sales: newSales,
+          imeiUnits: newImeiUnits,
+          stockAdjustments: newStockAdjustments,
+          purchaseOrders: newPurchaseOrders,
+          imeiHistories: newImeiHistories,
+          cashSessions: newCashSessions,
+        };
+
+        // Never persist cost price or confidential supplier documents to unauthorized user localStorage
+        saveStore(next, user?.uid, !isCostAllowed);
         return next;
       });
     });
@@ -388,16 +459,30 @@ export function BusinessProvider({ children }: { children: React.ReactNode }) {
 
   const switchBusiness = (bId: string) => {
     setActiveBusinessId(bId);
-    const bBranches = storeData.branches.filter(br => br.businessId === bId);
-    if (bBranches.length > 0) {
-      setActiveBranchId(bBranches[0].id);
-    } else {
-      setActiveBranchId(null);
+    const bBranches = storeData.branches.filter(br => br.businessId === bId && br.active !== false);
+    let targetBranchId = bBranches.length > 0 ? bBranches[0].id : null;
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem(`tokokoe_active_branch_${bId}`);
+        if (saved && bBranches.some(br => br.id === saved)) {
+          targetBranchId = saved;
+        }
+      } catch (e) {
+        // ignore
+      }
     }
+    setActiveBranchId(targetBranchId);
   };
 
   const switchBranch = (brId: string) => {
     setActiveBranchId(brId);
+    if (activeBusinessId && typeof window !== 'undefined') {
+      try {
+        localStorage.setItem(`tokokoe_active_branch_${activeBusinessId}`, brId);
+      } catch (e) {
+        // ignore
+      }
+    }
   };
 
   const createBusiness = async (
@@ -412,50 +497,19 @@ export function BusinessProvider({ children }: { children: React.ReactNode }) {
       headers['Authorization'] = `Bearer ${token}`;
     }
 
-    let createdBiz: Business;
-    let createdBranch: Branch;
+    const res = await fetch('/api/businesses/create', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ name, businessType, address, phone })
+    });
 
-    try {
-      const res = await fetch('/api/businesses/create', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ name, businessType, address, phone })
-      });
-
-      const resData = await res.json();
-      if (!res.ok || !resData.success) {
-        throw new Error(resData.message || 'Gagal menyimpan bisnis ke server');
-      }
-
-      createdBiz = resData.business;
-      createdBranch = resData.branch;
-    } catch (apiErr: any) {
-      console.warn('API /api/businesses/create fallback notice:', apiErr.message);
-      const newBizId = `biz_${Date.now()}`;
-      createdBiz = {
-        id: newBizId,
-        name,
-        businessType,
-        ownerId: user?.uid || 'usr_owner_budi',
-        currency: 'IDR',
-        timezone: 'Asia/Jakarta',
-        address,
-        phone,
-        enabledModules: DEFAULT_MODULES_BY_TYPE[businessType] || DEFAULT_MODULES_BY_TYPE.fnb,
-        status: 'active',
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-      };
-      createdBranch = {
-        id: `br_${Date.now()}`,
-        businessId: newBizId,
-        name: 'Cabang Utama',
-        code: 'CAB-01',
-        address,
-        isMainBranch: true,
-        active: true,
-      };
+    const resData = await res.json();
+    if (!res.ok || !resData.success) {
+      throw new Error(resData.message || 'Gagal menyimpan bisnis ke server');
     }
+
+    const createdBiz: Business = resData.business;
+    const createdBranch: Branch = resData.branch;
 
     setStoreData(prev => {
       const next = {
@@ -472,82 +526,322 @@ export function BusinessProvider({ children }: { children: React.ReactNode }) {
     return createdBiz;
   };
 
-  const createBranch = (name: string, address: string): Branch => {
-    const count = branches.length + 1;
-    const newBranch: Branch = {
-      id: `br_${Date.now()}`,
-      businessId: activeBusinessId || '',
-      name,
-      code: `CAB-0${count}`,
-      address,
-      isMainBranch: false,
-      active: true,
-    };
-    const newStore = { ...storeData };
-    newStore.branches.push(newBranch);
-    saveStore(newStore, user?.uid);
-    setStoreData(newStore);
-    return newBranch;
-  };
-
-  const createProduct = (data: Partial<Product>): Product => {
-    const targetBusinessId = activeBusinessId || '';
-    const cleanBarcode = data.barcode ? data.barcode.trim() : undefined;
-    const detectedType = cleanBarcode ? (data.barcodeType || detectBarcodeType(cleanBarcode)) : undefined;
-
-    const newProd: Product = {
-      id: `prod_${Date.now()}`,
-      businessId: targetBusinessId,
-      name: data.name || 'Produk Baru',
-      category: data.category || 'Umum',
-      sellingPrice: data.sellingPrice || 0,
-      costPrice: data.costPrice || 0,
-      available: true,
-      trackStock: data.trackStock ?? true,
-      stockQty: data.stockQty ?? 10,
-      imageUrl: data.imageUrl,
-      barcode: cleanBarcode,
-      barcodeType: detectedType,
-      sku: data.sku ? data.sku.trim() : undefined,
-      options: data.options,
-      modifiers: data.modifiers,
-      brand: data.brand,
-      model: data.model,
-      storage: data.storage,
-      color: data.color,
-      condition: data.condition,
-    };
-    const newStore = { ...storeData };
-    newStore.products.push(newProd);
-    saveStore(newStore, user?.uid);
-    setStoreData(newStore);
-
-    if (targetBusinessId) {
-      setDoc(doc(db, `businesses/${targetBusinessId}/products/${newProd.id}`), cleanUndefined(newProd)).catch(err => {
-        console.warn("Product firestore sync notice:", err);
+  const updateBusinessProfile = async (
+    businessId: string, 
+    updates: { name: string; address?: string; phone?: string }
+  ): Promise<{ success: boolean; business?: Business; error?: string }> => {
+    try {
+      const token = await getIdToken();
+      const res = await fetch('/api/businesses/profile', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          businessId,
+          ...updates,
+        }),
       });
+      const data = await res.json();
+      if (!data.success) {
+        return { success: false, error: data.message || 'Gagal menyimpan profil usaha.' };
+      }
+      setStoreData(prev => {
+        const next = {
+          ...prev,
+          businesses: prev.businesses.map(b => b.id === businessId ? data.business : b),
+        };
+        saveStore(next, user?.uid, !canViewCostPrice);
+        return next;
+      });
+      return { success: true, business: data.business };
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Terjadi kesalahan sistem saat menyimpan profil bisnis.' };
     }
-
-    return newProd;
   };
 
-  const updateProduct = (productId: string, updates: Partial<Product>) => {
-    const newStore = { ...storeData };
-    const idx = newStore.products.findIndex(p => p.id === productId);
-    if (idx !== -1) {
-      const cleanBarcode = updates.barcode !== undefined ? (updates.barcode ? updates.barcode.trim() : undefined) : newStore.products[idx].barcode;
-      const detectedType = cleanBarcode ? (updates.barcodeType || detectBarcodeType(cleanBarcode)) : undefined;
-      const mergedUpdates: Partial<Product> = { ...updates, barcode: cleanBarcode, barcodeType: detectedType };
-
-      newStore.products[idx] = { ...newStore.products[idx], ...mergedUpdates };
-      saveStore(newStore, user?.uid);
-      setStoreData(newStore);
-
-      if (activeBusinessId) {
-        setDoc(doc(db, `businesses/${activeBusinessId}/products/${productId}`), cleanUndefined(mergedUpdates), { merge: true }).catch(err => {
-          console.warn("Product update firestore sync notice:", err);
-        });
+  const createBranch = async (
+    name: string, 
+    address: string, 
+    phone?: string
+  ): Promise<{ success: boolean; branch?: Branch; error?: string }> => {
+    if (!activeBusinessId) return { success: false, error: 'Bisnis aktif belum dipilih.' };
+    try {
+      const token = await getIdToken();
+      const res = await fetch('/api/branches', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          businessId: activeBusinessId,
+          name,
+          address,
+          phone,
+        }),
+      });
+      const data = await res.json();
+      if (!data.success) {
+        return { success: false, error: data.message || 'Gagal menambahkan cabang.' };
       }
+      const newBr: Branch = data.branch;
+      setStoreData(prev => {
+        const next = {
+          ...prev,
+          branches: [...prev.branches.filter(b => b.id !== newBr.id), newBr],
+        };
+        saveStore(next, user?.uid, !canViewCostPrice);
+        return next;
+      });
+      return { success: true, branch: newBr };
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Terjadi kesalahan sistem saat membuat cabang.' };
+    }
+  };
+
+  const updateBranch = async (
+    branchId: string, 
+    updates: Partial<Branch>
+  ): Promise<{ success: boolean; branch?: Branch; error?: string }> => {
+    if (!activeBusinessId) return { success: false, error: 'Bisnis aktif belum dipilih.' };
+    try {
+      const token = await getIdToken();
+      const res = await fetch('/api/branches', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          businessId: activeBusinessId,
+          branchId,
+          ...updates,
+        }),
+      });
+      const data = await res.json();
+      if (!data.success) {
+        return { success: false, error: data.message || 'Gagal memperbarui cabang.' };
+      }
+      const updatedBr: Branch = data.branch;
+      setStoreData(prev => {
+        const next = {
+          ...prev,
+          branches: prev.branches.map(b => b.id === branchId ? updatedBr : b),
+        };
+        saveStore(next, user?.uid, !canViewCostPrice);
+        return next;
+      });
+      return { success: true, branch: updatedBr };
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Terjadi kesalahan sistem saat memperbarui cabang.' };
+    }
+  };
+
+  const deactivateBranch = async (
+    branchId: string
+  ): Promise<{ success: boolean; error?: string }> => {
+    if (!activeBusinessId) return { success: false, error: 'Bisnis aktif belum dipilih.' };
+    try {
+      const token = await getIdToken();
+      const res = await fetch('/api/branches', {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          businessId: activeBusinessId,
+          branchId,
+        }),
+      });
+      const data = await res.json();
+      if (!data.success) {
+        return { success: false, error: data.message || 'Gagal menonaktifkan cabang.' };
+      }
+      setStoreData(prev => {
+        const next = {
+          ...prev,
+          branches: prev.branches.map(b => b.id === branchId ? { ...b, active: false } : b),
+        };
+        saveStore(next, user?.uid, !canViewCostPrice);
+        return next;
+      });
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Terjadi kesalahan sistem saat menonaktifkan cabang.' };
+    }
+  };
+
+  const createProduct = async (data: Partial<Product>): Promise<{ success: boolean; product?: Product; error?: string }> => {
+    const targetBusinessId = activeBusinessId || '';
+    if (!targetBusinessId) return { success: false, error: 'Bisnis aktif belum dipilih.' };
+    try {
+      const token = await getIdToken();
+      const res = await fetch('/api/products', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          businessId: targetBusinessId,
+          ...data,
+        }),
+      });
+      const resData = await res.json();
+      if (!resData.success) {
+        return { success: false, error: resData.message || 'Gagal menambahkan produk.' };
+      }
+      const authoritativeProd: Product = resData.product;
+      setStoreData(prev => {
+        const next = {
+          ...prev,
+          products: [...prev.products.filter(p => p.id !== authoritativeProd.id), authoritativeProd],
+        };
+        saveStore(next, user?.uid, !canViewCostPrice);
+        return next;
+      });
+      return { success: true, product: authoritativeProd };
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Terjadi kesalahan sistem saat menyimpan produk.' };
+    }
+  };
+
+  const updateProduct = async (productId: string, updates: Partial<Product>): Promise<{ success: boolean; product?: Product; error?: string }> => {
+    const targetBusinessId = activeBusinessId || '';
+    if (!targetBusinessId) return { success: false, error: 'Bisnis aktif belum dipilih.' };
+    try {
+      const token = await getIdToken();
+      const res = await fetch('/api/products', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          businessId: targetBusinessId,
+          productId,
+          ...updates,
+        }),
+      });
+      const resData = await res.json();
+      if (!resData.success) {
+        return { success: false, error: resData.message || 'Gagal memperbarui data produk.' };
+      }
+      const updatedProd: Product = resData.product;
+      setStoreData(prev => {
+        const next = {
+          ...prev,
+          products: prev.products.map(p => p.id === productId ? updatedProd : p),
+        };
+        saveStore(next, user?.uid, !canViewCostPrice);
+        return next;
+      });
+      return { success: true, product: updatedProd };
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Terjadi kesalahan sistem saat memperbarui produk.' };
+    }
+  };
+
+  const archiveProduct = async (productId: string): Promise<{ success: boolean; error?: string }> => {
+    const targetBusinessId = activeBusinessId || '';
+    if (!targetBusinessId) return { success: false, error: 'Bisnis aktif belum dipilih.' };
+    try {
+      const token = await getIdToken();
+      const res = await fetch('/api/products', {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          businessId: targetBusinessId,
+          productId,
+        }),
+      });
+      const resData = await res.json();
+      if (!resData.success) {
+        return { success: false, error: resData.message || 'Gagal menonaktifkan produk.' };
+      }
+      setStoreData(prev => {
+        const next = {
+          ...prev,
+          products: prev.products.map(p => p.id === productId ? { ...p, isActive: false, available: false, archivedAt: Date.now() } : p),
+        };
+        saveStore(next, user?.uid, !canViewCostPrice);
+        return next;
+      });
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Terjadi kesalahan sistem saat menonaktifkan produk.' };
+    }
+  };
+
+  const updateEmployee = async (
+    memberId: string, 
+    updates: { displayName?: string; role?: UserRole; branchIds?: string[]; status?: 'active' | 'inactive'; permissions?: PermissionKey[] }
+  ): Promise<{ success: boolean; member?: BusinessMember; error?: string }> => {
+    if (!activeBusinessId) return { success: false, error: 'Bisnis aktif belum dipilih.' };
+    try {
+      const token = await getIdToken();
+      const res = await fetch('/api/employees/update', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          businessId: activeBusinessId,
+          memberId,
+          ...updates,
+        }),
+      });
+      const data = await res.json();
+      if (!data.success) {
+        return { success: false, error: data.message || 'Gagal memperbarui data karyawan.' };
+      }
+      const updatedMem: BusinessMember = data.member;
+      setStoreData(prev => {
+        const next = {
+          ...prev,
+          members: prev.members.map(m => m.id === memberId ? updatedMem : m),
+        };
+        saveStore(next, user?.uid, !canViewCostPrice);
+        return next;
+      });
+      return { success: true, member: updatedMem };
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Terjadi kesalahan sistem saat memperbarui karyawan.' };
+    }
+  };
+
+  const reloadMembers = async (): Promise<void> => {
+    if (!activeBusinessId) return;
+    try {
+      const token = await getIdToken();
+      const res = await fetch(`/api/employees/list?businessId=${activeBusinessId}`, {
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && data.members) {
+          setStoreData(prev => {
+            const other = prev.members.filter(m => m.businessId !== activeBusinessId);
+            const next = {
+              ...prev,
+              members: [...other, ...data.members],
+            };
+            saveStore(next, user?.uid, !canViewCostPrice);
+            return next;
+          });
+        }
+      }
+    } catch (err) {
+      console.warn("Notice: could not reload members:", err);
     }
   };
 
@@ -601,47 +895,74 @@ export function BusinessProvider({ children }: { children: React.ReactNode }) {
       }
 
       const authoritativeSale = res.sale;
-      const newStore = { ...storeData };
 
-      // Deduct stock in client store to match server authoritative transaction
-      for (const item of authoritativeSale.lineItems) {
-        const prod = newStore.products.find(p => p.id === item.productId);
-        if (prod && prod.trackStock) {
-          prod.stockQty = Math.max(0, prod.stockQty - item.quantity);
-        }
-        if (item.imei) {
-          const unit = newStore.imeiUnits.find(u => u.imei === item.imei);
-          if (unit) {
-            unit.status = 'sold';
-            unit.soldAtSaleId = authoritativeSale.id;
+      // Server-authoritative state synchronization with immutable updates & deduplication
+      setStoreData(prev => {
+        // Prevent duplicate sale if real-time listener already added it
+        const alreadyExists = prev.sales.some(s => s.id === authoritativeSale.id);
+        const updatedSales = alreadyExists 
+          ? prev.sales 
+          : [authoritativeSale, ...prev.sales];
+
+        // Deduct stock immutably only if listener hasn't already delivered the deducted stock
+        const updatedProducts = alreadyExists
+          ? prev.products
+          : prev.products.map(prod => {
+              const line = authoritativeSale.lineItems.find(item => item.productId === prod.id);
+              if (!line || !prod.trackStock) return prod;
+              return {
+                ...prod,
+                stockQty: Math.max(0, prod.stockQty - line.quantity),
+              };
+            });
+
+        const updatedImeis = alreadyExists
+          ? prev.imeiUnits
+          : prev.imeiUnits.map(unit => {
+              const line = authoritativeSale.lineItems.find(item => item.imei === unit.imei);
+              if (!line) return unit;
+              return {
+                ...unit,
+                status: 'sold' as const,
+                soldAtSaleId: authoritativeSale.id,
+              };
+            });
+
+        const updatedSessions = prev.cashSessions.map(cs => {
+          if (activeShift && cs.id === activeShift.id && payload.paymentMethod === 'cash' && !alreadyExists) {
+            return {
+              ...cs,
+              cashSalesTotal: cs.cashSalesTotal + authoritativeSale.grandTotal,
+              expectedClosingCash: cs.expectedClosingCash + authoritativeSale.grandTotal,
+            };
           }
-        }
-      }
+          return cs;
+        });
 
-      // Add authoritative sale
-      newStore.sales.unshift(authoritativeSale);
+        const updatedTables = prev.tables.map(tbl => {
+          if (payload.tableNumber && tbl.tableNumber === payload.tableNumber && tbl.businessId === activeBusinessId) {
+            return {
+              ...tbl,
+              status: 'occupied' as const,
+              activeSaleId: authoritativeSale.id,
+              customerName: payload.customerName,
+            };
+          }
+          return tbl;
+        });
 
-      // Update active cash session if cash sale
-      if (activeShift && payload.paymentMethod === 'cash') {
-        const shiftIdx = newStore.cashSessions.findIndex(s => s.id === activeShift.id);
-        if (shiftIdx !== -1) {
-          newStore.cashSessions[shiftIdx].cashSalesTotal += authoritativeSale.grandTotal;
-          newStore.cashSessions[shiftIdx].expectedClosingCash += authoritativeSale.grandTotal;
-        }
-      }
+        const nextStore: AppStoreData = {
+          ...prev,
+          products: updatedProducts,
+          imeiUnits: updatedImeis,
+          sales: updatedSales,
+          cashSessions: updatedSessions,
+          tables: updatedTables,
+        };
 
-      // Update table status if dine-in
-      if (payload.tableNumber) {
-        const tbl = newStore.tables.find(t => t.tableNumber === payload.tableNumber && t.businessId === activeBusinessId);
-        if (tbl) {
-          tbl.status = 'occupied';
-          tbl.activeSaleId = authoritativeSale.id;
-          tbl.customerName = payload.customerName;
-        }
-      }
-
-      saveStore(newStore, user?.uid);
-      setStoreData(newStore);
+        saveStore(nextStore, user?.uid, !canViewCostPrice);
+        return nextStore;
+      });
 
       return { success: true, sale: authoritativeSale };
     } finally {
@@ -1311,10 +1632,17 @@ export function BusinessProvider({ children }: { children: React.ReactNode }) {
       cashSessions: storeData.cashSessions,
       switchBusiness,
       switchBranch,
+      isOnline,
       createBusiness,
+      updateBusinessProfile,
       createBranch,
+      updateBranch,
+      deactivateBranch,
       createProduct,
       updateProduct,
+      archiveProduct,
+      updateEmployee,
+      reloadMembers,
       processCheckout,
       openShift,
       closeShift,

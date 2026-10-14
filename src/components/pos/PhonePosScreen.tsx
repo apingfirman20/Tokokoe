@@ -72,8 +72,12 @@ export function PhonePosScreen() {
     return isAvail && matchSearch;
   });
 
-  // Accessories & Service products (non-IMEI)
-  const accessoryProducts = products.filter(p => p.category === 'Aksesoris' || p.category === 'Servis');
+  // Accessories & Service products (non-IMEI, active only)
+  const accessoryProducts = products.filter(p => 
+    (p.category === 'Aksesoris' || p.category === 'Servis') &&
+    p.isActive !== false &&
+    p.available !== false
+  );
 
   const addImeiToCart = (unit: ImeiUnit) => {
     // Check if already in cart
@@ -97,6 +101,10 @@ export function PhonePosScreen() {
   };
 
   const addAccessoryToCart = (prod: Product) => {
+    if (prod.isActive === false || prod.available === false) {
+      alert(`Produk "${prod.name}" sedang nonaktif / diarsipkan.`);
+      return;
+    }
     setCart(prev => {
       const existing = prev.find(item => item.productId === prod.id && !item.imei);
       if (existing) {

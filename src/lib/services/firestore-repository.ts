@@ -54,9 +54,7 @@ export function subscribeToBusinessTenant(
       productsRef, 
       (snapshot) => {
         const products = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Product));
-        if (products.length > 0) {
-          onUpdate({ products });
-        }
+        onUpdate({ products });
       },
       (err) => {
         console.warn("Firestore products live listener notice:", err.message);
@@ -65,16 +63,42 @@ export function subscribeToBusinessTenant(
     );
     unsubscribers.push(unsubProducts);
 
-    // 2. Sales collection real-time listener (Recent sales)
+    // 2. Branches collection real-time listener
+    const branchesRef = collection(db, `businesses/${businessId}/branches`);
+    const unsubBranches = onSnapshot(
+      branchesRef,
+      (snapshot) => {
+        const branches = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Branch));
+        onUpdate({ branches });
+      },
+      (err) => {
+        console.warn("Firestore branches live listener notice:", err.message);
+      }
+    );
+    unsubscribers.push(unsubBranches);
+
+    // 3. Members collection real-time listener
+    const membersRef = collection(db, `businesses/${businessId}/members`);
+    const unsubMembers = onSnapshot(
+      membersRef,
+      (snapshot) => {
+        const members = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as BusinessMember));
+        onUpdate({ members });
+      },
+      (err) => {
+        console.warn("Firestore members live listener notice:", err.message);
+      }
+    );
+    unsubscribers.push(unsubMembers);
+
+    // 4. Sales collection real-time listener (Recent sales)
     const salesRef = collection(db, `businesses/${businessId}/sales`);
-    const salesQuery = query(salesRef, orderBy("createdAt", "desc"), limit(50));
+    const salesQuery = query(salesRef, orderBy("createdAt", "desc"), limit(100));
     const unsubSales = onSnapshot(
       salesQuery,
       (snapshot) => {
         const sales = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Sale));
-        if (sales.length > 0) {
-          onUpdate({ sales });
-        }
+        onUpdate({ sales });
       },
       (err) => {
         console.warn("Firestore sales live listener notice:", err.message);
@@ -82,15 +106,13 @@ export function subscribeToBusinessTenant(
     );
     unsubscribers.push(unsubSales);
 
-    // 3. IMEI Units real-time listener
+    // 5. IMEI Units real-time listener
     const imeiRef = collection(db, `businesses/${businessId}/imeiUnits`);
     const unsubImei = onSnapshot(
       imeiRef,
       (snapshot) => {
         const imeiUnits = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as ImeiUnit));
-        if (imeiUnits.length > 0) {
-          onUpdate({ imeiUnits });
-        }
+        onUpdate({ imeiUnits });
       },
       (err) => {
         console.warn("Firestore imei live listener notice:", err.message);
@@ -98,15 +120,13 @@ export function subscribeToBusinessTenant(
     );
     unsubscribers.push(unsubImei);
 
-    // 4. Stock Adjustments real-time listener
+    // 6. Stock Adjustments real-time listener
     const adjustmentsRef = collection(db, `businesses/${businessId}/stockAdjustments`);
     const unsubAdjustments = onSnapshot(
       adjustmentsRef,
       (snapshot) => {
         const stockAdjustments = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as StockAdjustment));
-        if (stockAdjustments.length > 0) {
-          onUpdate({ stockAdjustments });
-        }
+        onUpdate({ stockAdjustments });
       },
       (err) => {
         console.warn("Firestore adjustments live listener notice:", err.message);
@@ -114,15 +134,13 @@ export function subscribeToBusinessTenant(
     );
     unsubscribers.push(unsubAdjustments);
 
-    // 5. Purchase Orders real-time listener
+    // 7. Purchase Orders real-time listener
     const poRef = collection(db, `businesses/${businessId}/purchaseOrders`);
     const unsubPo = onSnapshot(
       poRef,
       (snapshot) => {
         const purchaseOrders = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as PurchaseOrder));
-        if (purchaseOrders.length > 0) {
-          onUpdate({ purchaseOrders });
-        }
+        onUpdate({ purchaseOrders });
       },
       (err) => {
         console.warn("Firestore PO live listener notice:", err.message);
@@ -130,21 +148,33 @@ export function subscribeToBusinessTenant(
     );
     unsubscribers.push(unsubPo);
 
-    // 6. IMEI Histories real-time listener
+    // 8. IMEI Histories real-time listener
     const imeiHistRef = collection(db, `businesses/${businessId}/imeiHistory`);
     const unsubImeiHist = onSnapshot(
       imeiHistRef,
       (snapshot) => {
         const imeiHistories = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as ImeiHistory));
-        if (imeiHistories.length > 0) {
-          onUpdate({ imeiHistories });
-        }
+        onUpdate({ imeiHistories });
       },
       (err) => {
         console.warn("Firestore IMEI History live listener notice:", err.message);
       }
     );
     unsubscribers.push(unsubImeiHist);
+
+    // 9. Cash Sessions real-time listener
+    const cashRef = collection(db, `businesses/${businessId}/cashSessions`);
+    const unsubCash = onSnapshot(
+      cashRef,
+      (snapshot) => {
+        const cashSessions = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as CashSession));
+        onUpdate({ cashSessions });
+      },
+      (err) => {
+        console.warn("Firestore Cash Sessions live listener notice:", err.message);
+      }
+    );
+    unsubscribers.push(unsubCash);
 
   } catch (err: any) {
     console.warn("Firestore real-time subscription setup notice:", err.message);
