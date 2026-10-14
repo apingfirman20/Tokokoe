@@ -42,6 +42,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<UserRole, PermissionKey[]> = {
     'sales.create',
     'sales.read',
     'inventory.read',
+    'inventory.adjust',
     'shift.manage',
   ],
   warehouse: [

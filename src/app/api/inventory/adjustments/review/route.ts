@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { adminDb } from "@/lib/firebase/admin";
+import { StockMovement } from "@/types";
 import { 
   requireAuthenticatedUser, 
   requireBusinessPermission, 
@@ -8,9 +9,9 @@ import {
 } from "@/lib/server/auth-guard";
 
 const reviewSchema = z.object({
-  businessId: z.string().min(1),
-  adjustmentId: z.string().min(1),
-  action: z.enum(['approved', 'rejected']),
+  businessId: z.string().min(1, "businessId wajib diisi"),
+  adjustmentId: z.string().min(1, "adjustmentId wajib diisi"),
+  action: z.enum(["approved", "rejected"]),
 });
 
 export async function POST(request: Request) {
@@ -30,11 +31,15 @@ export async function POST(request: Request) {
 
     const { businessId, adjustmentId, action } = parsed.data;
 
-    // 2. Authoritative RBAC check: Caller must have 'approvals.manage' permission
-    const membership = await requireBusinessPermission(businessId, authUser.uid, 'approvals.manage');
+    // 2. Authoritative RBAC check: Caller must have 'approvals.manage' permission (Owner/Manager)
+    const membership = await requireBusinessPermission(businessId, authUser.uid, "approvals.manage");
 
     const now = Date.now();
-    let updatedProductStock = null;
+    let updatedProductStock: number | null = null;
+    let conflictErrorMsg: string | null = null;
+    let notFound = false;
+    let alreadyProcessed = false;
+    let currentStatus = "";
 
     await adminDb.runTransaction(async (transaction) => {
       // 1. All reads first
@@ -42,28 +47,32 @@ export async function POST(request: Request) {
       const adjDoc = await transaction.get(adjRef);
 
       if (!adjDoc.exists) {
-        throw new Error("Permintaan penyesuaian stok tidak ditemukan.");
+        notFound = true;
+        return;
       }
 
       const adjData = adjDoc.data();
-      if (adjData?.status !== 'pending') {
-        throw new Error(`Permintaan ini sudah diproses sebelumnya dengan status: ${adjData?.status}.`);
+      if (adjData?.status !== "pending") {
+        alreadyProcessed = true;
+        currentStatus = adjData?.status || "unknown";
+        return;
       }
 
       const prodRef = adminDb.doc(`businesses/${businessId}/products/${adjData.productId}`);
       const prodDoc = await transaction.get(prodRef);
 
-      // Verify whether stock changed since the request was initiated
-      if (prodDoc.exists) {
+      // Verify whether stock changed since the request was initiated (Stale Request Detection)
+      if (action === "approved" && prodDoc.exists) {
         const prodData = prodDoc.data();
         const currentStock = prodData?.stockQty ?? 0;
         if (currentStock !== adjData.previousQty) {
-          throw new Error(`Stok fisik di sistem (${currentStock}) telah berubah dari nilai saat diajukan (${adjData.previousQty}). Silakan lakukan opname ulang.`);
+          conflictErrorMsg = `Stok sistem produk (${currentStock}) telah berubah dari nilai saat diajukan (${adjData.previousQty}) karena adanya penjualan atau pergerakan stok lainnya. Permintaan ini sudah kedaluwarsa (stale) dan tidak dapat disetujui. Silakan tolak atau lakukan opname ulang.`;
+          return;
         }
       }
 
-      // 2. Writes
-      if (action === 'approved') {
+      // 2. Writes second
+      if (action === "approved") {
         if (prodDoc.exists) {
           transaction.update(prodRef, {
             stockQty: adjData.adjustedQty,
@@ -74,7 +83,7 @@ export async function POST(request: Request) {
 
         // Update adjustment document with authoritative reviewer identity
         transaction.update(adjRef, {
-          status: 'approved',
+          status: "approved",
           reviewedBy: authUser.uid,
           reviewedByName: membership.displayName,
           reviewedAt: now,
@@ -84,7 +93,7 @@ export async function POST(request: Request) {
         const auditRef = adminDb.collection(`businesses/${businessId}/auditLogs`).doc();
         transaction.set(auditRef, {
           id: auditRef.id,
-          action: 'stock_adjustment_approved',
+          action: "stock_adjustment_approved",
           businessId,
           targetId: adjData.productId,
           diff: adjData.diff,
@@ -96,15 +105,15 @@ export async function POST(request: Request) {
           timestamp: now,
         });
 
-        // Write authoritative StockMovement record
+        // Write authoritative StockMovement record in stock ledger
         const movRef = adminDb.collection(`businesses/${businessId}/stockMovements`).doc();
-        transaction.set(movRef, {
+        const movData: StockMovement = {
           id: movRef.id,
           businessId,
-          branchId: adjData.branchId || 'br_main',
+          branchId: adjData.branchId || "br_main",
           productId: adjData.productId,
-          productName: prodDoc.exists ? prodDoc.data()?.name : adjData.productId,
-          type: 'adjustment',
+          productName: prodDoc.exists ? (prodDoc.data()?.name || adjData.productId) : adjData.productId,
+          type: "adjustment",
           quantityDelta: adjData.diff,
           previousQty: adjData.previousQty,
           newQty: adjData.adjustedQty,
@@ -113,11 +122,12 @@ export async function POST(request: Request) {
           operatorName: membership.displayName,
           notes: `Penyesuaian stok opname disetujui (Alasan: ${adjData.reason})`,
           timestamp: now,
-        });
+        };
+        transaction.set(movRef, movData);
       } else {
-        // Mark rejected
+        // Rejection: Can reject even if stale without altering product stock!
         transaction.update(adjRef, {
-          status: 'rejected',
+          status: "rejected",
           reviewedBy: authUser.uid,
           reviewedByName: membership.displayName,
           reviewedAt: now,
@@ -127,7 +137,7 @@ export async function POST(request: Request) {
         const auditRef = adminDb.collection(`businesses/${businessId}/auditLogs`).doc();
         transaction.set(auditRef, {
           id: auditRef.id,
-          action: 'stock_adjustment_rejected',
+          action: "stock_adjustment_rejected",
           businessId,
           targetId: adjData.productId,
           reason: adjData.reason,
@@ -138,16 +148,43 @@ export async function POST(request: Request) {
       }
     });
 
+    if (notFound) {
+      return NextResponse.json(
+        { success: false, message: "Permintaan penyesuaian stok tidak ditemukan." },
+        { status: 404 }
+      );
+    }
+
+    if (alreadyProcessed) {
+      return NextResponse.json(
+        { success: false, message: `Permintaan ini sudah diproses sebelumnya dengan status: ${currentStatus}.` },
+        { status: 400 }
+      );
+    }
+
+    if (conflictErrorMsg) {
+      return NextResponse.json(
+        { success: false, message: conflictErrorMsg },
+        { status: 409 }
+      );
+    }
+
     return NextResponse.json({
       success: true,
       action,
+      adjustment: {
+        id: adjustmentId,
+        status: action,
+        reviewedBy: authUser.uid,
+        reviewedByName: membership.displayName,
+        reviewedAt: now,
+      },
       updatedProductStock,
-      message: action === 'approved' 
-        ? "Penyesuaian stok disetujui. Jumlah stok produk telah diperbarui secara otomatis."
+      message: action === "approved" 
+        ? "Penyesuaian stok disetujui. Jumlah stok produk telah diperbarui secara otomatis di stock ledger."
         : "Permintaan penyesuaian stok ditolak."
-    });
+    }, { status: 200 });
   } catch (error) {
     return handleAuthApiError(error);
   }
 }
-

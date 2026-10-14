@@ -49,34 +49,54 @@ export default function InventoryPage() {
     if (!selectedProduct) return;
 
     if (isOwnerOrManager) {
-      // Owner can directly adjust and record audit
-      updateProduct(selectedProduct.id, {
-        stockQty: newStock,
-      });
-      await requestStockAdjustment({
+      // Owner/Manager submits request and approves via authoritative review
+      const reqRes = await requestStockAdjustment({
         productId: selectedProduct.id,
         productName: selectedProduct.name,
         previousQty: selectedProduct.stockQty,
         adjustedQty: newStock,
         reason: adjustReason,
       });
-      setFeedbackMsg({
-        type: 'success',
-        text: `Stok "${selectedProduct.name}" berhasil disesuaikan menjadi ${newStock} unit.`
-      });
+
+      if (reqRes.success && reqRes.adjustment) {
+        const revRes = await reviewStockAdjustment(reqRes.adjustment.id, 'approved');
+        if (revRes.success) {
+          setFeedbackMsg({
+            type: 'success',
+            text: `Stok "${selectedProduct.name}" berhasil disesuaikan menjadi ${newStock} unit.`
+          });
+        } else {
+          setFeedbackMsg({
+            type: 'error',
+            text: revRes.error || 'Gagal menyetujui penyesuaian stok di server.'
+          });
+        }
+      } else {
+        setFeedbackMsg({
+          type: 'error',
+          text: reqRes.error || 'Gagal mengajukan penyesuaian stok ke server.'
+        });
+      }
     } else {
       // Staff submits for owner approval
-      await requestStockAdjustment({
+      const reqRes = await requestStockAdjustment({
         productId: selectedProduct.id,
         productName: selectedProduct.name,
         previousQty: selectedProduct.stockQty,
         adjustedQty: newStock,
         reason: adjustReason,
       });
-      setFeedbackMsg({
-        type: 'success',
-        text: `Permintaan penyesuaian stok "${selectedProduct.name}" diajukan ke antrean persetujuan Owner.`
-      });
+      if (reqRes.success) {
+        setFeedbackMsg({
+          type: 'success',
+          text: `Permintaan penyesuaian stok "${selectedProduct.name}" diajukan ke antrean persetujuan Owner.`
+        });
+      } else {
+        setFeedbackMsg({
+          type: 'error',
+          text: reqRes.error || 'Gagal mengajukan penyesuaian stok.'
+        });
+      }
     }
 
     setShowAdjustModal(false);
@@ -90,6 +110,11 @@ export default function InventoryPage() {
         type: 'success',
         text: `Penyesuaian stok "${adj.productName}" disetujui. Stok produk diperbarui.`
       });
+    } else {
+      setFeedbackMsg({
+        type: 'error',
+        text: res.error || 'Gagal menyetujui penyesuaian stok.'
+      });
     }
     setTimeout(() => setFeedbackMsg(null), 5000);
   };
@@ -100,6 +125,11 @@ export default function InventoryPage() {
       setFeedbackMsg({
         type: 'success',
         text: `Permintaan penyesuaian stok "${adj.productName}" ditolak.`
+      });
+    } else {
+      setFeedbackMsg({
+        type: 'error',
+        text: res.error || 'Gagal menolak penyesuaian stok.'
       });
     }
     setTimeout(() => setFeedbackMsg(null), 5000);

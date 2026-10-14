@@ -184,7 +184,7 @@ export interface ImeiHistory {
   timestamp: number;
 }
 
-export type StockMovementType = 'sale' | 'purchase_order' | 'adjustment' | 'exchange' | 'refund' | 'return';
+export type StockMovementType = 'opening_balance' | 'sale' | 'purchase_order' | 'adjustment' | 'exchange' | 'refund' | 'return';
 
 export interface StockMovement {
   id: string;

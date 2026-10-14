@@ -62,8 +62,9 @@ interface BusinessContextType {
     tableNumber?: string;
     customerName?: string;
   }) => Promise<{ success: boolean; sale?: Sale; error?: string }>;
-  openShift: (openingCash: number, notes?: string) => CashSession;
-  closeShift: (actualCash: number, notes?: string) => CashSession;
+  openShift: (openingCash: number, notes?: string) => Promise<CashSession>;
+  closeShift: (actualCash: number, notes?: string) => Promise<CashSession>;
+  recordCashMovement: (type: 'cash_in' | 'cash_out', amount: number, reason: string) => Promise<{ success: boolean; error?: string }>;
   addEmployee: (displayName: string, username: string, role: UserRole, branchIds: string[], initialPassword: string) => Promise<{ success: boolean; error?: string }>;
   sellInDevice: (data: {
     imei: string;
@@ -971,53 +972,137 @@ export function BusinessProvider({ children }: { children: React.ReactNode }) {
   };
 
 
-  const openShift = (openingCash: number, notes?: string): CashSession => {
-    const newShift: CashSession = {
-      id: `shift_${Date.now()}`,
-      businessId: activeBusinessId || '',
-      branchId: activeBranch?.id || 'br_main',
-      cashierId: user?.uid || 'usr_cashier',
-      cashierName: user?.displayName || 'Kasir',
-      openedAt: Date.now(),
-      openingCash,
-      cashSalesTotal: 0,
-      cashInTotal: 0,
-      cashOutTotal: 0,
-      expectedClosingCash: openingCash,
-      status: 'open',
-      notes: notes || 'Shift Kasir Aktif',
-    };
+  const openShift = async (openingCash: number, notes?: string): Promise<CashSession> => {
+    try {
+      const token = await getIdToken();
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
 
-    const newStore = { ...storeData };
-    newStore.cashSessions.unshift(newShift);
-    saveStore(newStore, user?.uid);
-    setStoreData(newStore);
-    return newShift;
+      const res = await fetch('/api/shifts/open', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          businessId: activeBusinessId,
+          branchId: activeBranch?.id || 'br_main',
+          openingCash: Math.round(Number(openingCash)),
+          notes: notes?.trim() || undefined,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.message || 'Gagal membuka shift kasir.');
+      }
+
+      const authoritativeShift: CashSession = data.shift;
+      setStoreData(prev => {
+        const otherSessions = prev.cashSessions.filter(s => s.id !== authoritativeShift.id);
+        const nextStore = {
+          ...prev,
+          cashSessions: [authoritativeShift, ...otherSessions],
+        };
+        saveStore(nextStore, user?.uid, !canViewCostPrice);
+        return nextStore;
+      });
+
+      return authoritativeShift;
+    } catch (err: any) {
+      console.error('Error opening shift:', err);
+      throw err;
+    }
   };
 
-  const closeShift = (actualCash: number, notes?: string): CashSession => {
+  const closeShift = async (actualCash: number, notes?: string): Promise<CashSession> => {
     if (!activeShift) {
       throw new Error('Tidak ada shift kasir yang sedang aktif.');
     }
 
-    const newStore = { ...storeData };
-    const shiftIdx = newStore.cashSessions.findIndex(s => s.id === activeShift.id);
-    if (shiftIdx !== -1) {
-      const current = newStore.cashSessions[shiftIdx];
-      const discrepancy = actualCash - current.expectedClosingCash;
-      newStore.cashSessions[shiftIdx] = {
-        ...current,
-        closedAt: Date.now(),
-        actualClosingCash: actualCash,
-        discrepancy,
-        status: 'closed',
-        notes: notes || current.notes,
-      };
-      saveStore(newStore, user?.uid);
-      setStoreData(newStore);
-      return newStore.cashSessions[shiftIdx];
+    try {
+      const token = await getIdToken();
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
+      const res = await fetch('/api/shifts/close', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          businessId: activeBusinessId,
+          cashSessionId: activeShift.id,
+          actualClosingCash: Math.round(Number(actualCash)),
+          notes: notes?.trim() || undefined,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.message || 'Gagal menutup shift kasir.');
+      }
+
+      const authoritativeShift: CashSession = data.shift;
+      setStoreData(prev => {
+        const updated = prev.cashSessions.map(s => s.id === authoritativeShift.id ? authoritativeShift : s);
+        const nextStore = {
+          ...prev,
+          cashSessions: updated,
+        };
+        saveStore(nextStore, user?.uid, !canViewCostPrice);
+        return nextStore;
+      });
+
+      return authoritativeShift;
+    } catch (err: any) {
+      console.error('Error closing shift:', err);
+      throw err;
     }
-    return activeShift;
+  };
+
+  const recordCashMovement = async (
+    type: 'cash_in' | 'cash_out',
+    amount: number,
+    reason: string
+  ): Promise<{ success: boolean; error?: string }> => {
+    if (!activeShift) {
+      return { success: false, error: 'Tidak ada shift kasir yang sedang aktif.' };
+    }
+
+    try {
+      const token = await getIdToken();
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
+      const res = await fetch('/api/shifts/cash-movement', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          businessId: activeBusinessId,
+          cashSessionId: activeShift.id,
+          type,
+          amount: Math.round(Number(amount)),
+          reason: reason.trim(),
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        return { success: false, error: data.message || 'Gagal mencatat mutasi kas kasir.' };
+      }
+
+      if (data.shift) {
+        setStoreData(prev => {
+          const updated = prev.cashSessions.map(s => s.id === data.shift.id ? data.shift : s);
+          const nextStore = {
+            ...prev,
+            cashSessions: updated,
+          };
+          saveStore(nextStore, user?.uid, !canViewCostPrice);
+          return nextStore;
+        });
+      }
+
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Gagal menghubungi server mutasi kas.' };
+    }
   };
 
   const addEmployee = async (
@@ -1359,72 +1444,58 @@ export function BusinessProvider({ children }: { children: React.ReactNode }) {
     reason: string;
     imei?: string;
   }) => {
-    const newStore = { ...storeData };
-    const now = Date.now();
-    const adjId = `adj_${now}_${Math.random().toString(36).substring(2, 6)}`;
-    const newAdj: StockAdjustment = {
-      id: adjId,
-      businessId: activeBusinessId || '',
-      branchId: activeBranch?.id || 'br_main',
-      productId: data.productId,
-      productName: data.productName,
-      imei: data.imei,
-      previousQty: data.previousQty,
-      adjustedQty: data.adjustedQty,
-      diff: data.adjustedQty - data.previousQty,
-      reason: data.reason,
-      requestedBy: user?.uid || 'usr_staff',
-      requestedByName: user?.displayName || 'Staf Kasir',
-      status: 'pending',
-      createdAt: now,
-    };
-    newStore.stockAdjustments.unshift(newAdj);
-    saveStore(newStore, user?.uid);
-    setStoreData(newStore);
-
-    getIdToken().then((token) => {
+    try {
+      const token = await getIdToken();
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (token) headers['Authorization'] = `Bearer ${token}`;
-      fetch('/api/inventory/adjustments/request', {
+
+      const res = await fetch('/api/inventory/adjustments/request', {
         method: 'POST',
         headers,
-        body: JSON.stringify(newAdj),
-      }).catch(err => console.warn('Background adjustment request sync:', err));
-    });
+        body: JSON.stringify({
+          businessId: activeBusinessId,
+          branchId: activeBranch?.id || 'br_main',
+          productId: data.productId,
+          productName: data.productName,
+          previousQty: data.previousQty,
+          adjustedQty: data.adjustedQty,
+          reason: data.reason,
+          imei: data.imei,
+        }),
+      });
 
-    return { success: true, adjustment: newAdj };
+      const resData = await res.json();
+      if (!res.ok || !resData.success) {
+        return {
+          success: false,
+          error: resData.message || 'Gagal mengajukan penyesuaian stok ke server.',
+        };
+      }
+
+      const authoritativeAdj: StockAdjustment = resData.adjustment;
+      setStoreData(prev => {
+        const withoutExisting = (prev.stockAdjustments || []).filter(a => a.id !== authoritativeAdj.id);
+        const nextStore = {
+          ...prev,
+          stockAdjustments: [authoritativeAdj, ...withoutExisting],
+        };
+        saveStore(nextStore, user?.uid, !canViewCostPrice);
+        return nextStore;
+      });
+
+      return { success: true, adjustment: authoritativeAdj };
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Gagal menghubungi server penyesuaian stok.' };
+    }
   };
 
   const reviewStockAdjustment = async (adjustmentId: string, action: 'approved' | 'rejected') => {
-    const newStore = { ...storeData };
-    const adj = newStore.stockAdjustments.find(a => a.id === adjustmentId);
-    if (!adj) return { success: false, error: 'Permintaan penyesuaian tidak ditemukan.' };
-
-    const now = Date.now();
-    adj.status = action;
-    adj.reviewedBy = user?.displayName || 'Owner';
-    adj.reviewedAt = now;
-
-    if (action === 'approved') {
-      const prod = newStore.products.find(p => p.id === adj.productId);
-      if (prod) {
-        prod.stockQty = adj.adjustedQty;
-        prod.updatedAt = now;
-        if (activeBusinessId) {
-          const prodRef = doc(db, `businesses/${activeBusinessId}/products/${prod.id}`);
-          setDoc(prodRef, cleanUndefined({ stockQty: adj.adjustedQty, updatedAt: now }), { merge: true })
-            .catch(e => console.warn('Product stock sync error:', e));
-        }
-      }
-    }
-
-    saveStore(newStore, user?.uid);
-    setStoreData(newStore);
-
-    getIdToken().then((token) => {
+    try {
+      const token = await getIdToken();
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (token) headers['Authorization'] = `Bearer ${token}`;
-      fetch('/api/inventory/adjustments/review', {
+
+      const res = await fetch('/api/inventory/adjustments/review', {
         method: 'POST',
         headers,
         body: JSON.stringify({
@@ -1432,10 +1503,49 @@ export function BusinessProvider({ children }: { children: React.ReactNode }) {
           adjustmentId,
           action,
         }),
-      }).catch(err => console.warn('Background adjustment review sync:', err));
-    });
+      });
 
-    return { success: true };
+      const resData = await res.json();
+      if (!res.ok || !resData.success) {
+        return {
+          success: false,
+          error: resData.message || 'Gagal memproses review penyesuaian stok.',
+        };
+      }
+
+      const authoritativeAdj: StockAdjustment = resData.adjustment;
+      setStoreData(prev => {
+        const updatedAdjs = (prev.stockAdjustments || []).map(a => 
+          a.id === adjustmentId ? authoritativeAdj : a
+        );
+
+        let updatedProducts = prev.products;
+        if (action === 'approved' && authoritativeAdj) {
+          updatedProducts = prev.products.map(p => {
+            if (p.id === authoritativeAdj.productId) {
+              return {
+                ...p,
+                stockQty: authoritativeAdj.adjustedQty,
+                updatedAt: Date.now(),
+              };
+            }
+            return p;
+          });
+        }
+
+        const nextStore = {
+          ...prev,
+          products: updatedProducts,
+          stockAdjustments: updatedAdjs,
+        };
+        saveStore(nextStore, user?.uid, !canViewCostPrice);
+        return nextStore;
+      });
+
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Gagal memproses persetujuan penyesuaian stok.' };
+    }
   };
 
   const createPurchaseOrder = async (data: {
@@ -1646,6 +1756,7 @@ export function BusinessProvider({ children }: { children: React.ReactNode }) {
       processCheckout,
       openShift,
       closeShift,
+      recordCashMovement,
       addEmployee,
       sellInDevice,
       exchangeImei,

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { adminDb } from "@/lib/firebase/admin";
 import { generateSaleReference, cleanUndefined } from "@/lib/utils";
-import { Sale, CartLineItem, StockMovement } from "@/types";
+import { Sale, CartLineItem, StockMovement, Business } from "@/types";
 import { normalizeImei } from "@/lib/validation/imei";
 import { 
   requireAuthenticatedUser, 
@@ -12,9 +12,9 @@ import {
 } from "@/lib/server/auth-guard";
 
 const lineItemSchema = z.object({
-  productId: z.string().min(1),
+  productId: z.string().min(1, "productId wajib diisi"),
   productName: z.string().optional(),
-  quantity: z.number().int().positive(),
+  quantity: z.number().int("Kuantitas harus berupa bilangan bulat").positive("Kuantitas harus lebih dari 0"),
   unitPrice: z.number().int().nonnegative().optional(),
   subtotal: z.number().int().nonnegative().optional(),
   imei: z.string().optional(),
@@ -23,16 +23,16 @@ const lineItemSchema = z.object({
 });
 
 const checkoutSchema = z.object({
-  businessId: z.string().min(1),
-  branchId: z.string().min(1),
+  businessId: z.string().min(1, "businessId wajib diisi"),
+  branchId: z.string().min(1, "branchId wajib diisi"),
   customerName: z.string().optional(),
   orderType: z.enum(['dine_in', 'takeaway', 'delivery', 'retail_pos', 'phone_pos']),
   tableNumber: z.string().optional(),
-  lineItems: z.array(lineItemSchema).min(1),
-  discount: z.number().int().nonnegative().default(0),
-  tax: z.number().int().nonnegative().default(0),
-  serviceCharge: z.number().int().nonnegative().default(0),
-  paidAmount: z.number().int().nonnegative(),
+  lineItems: z.array(lineItemSchema).min(1, "Keranjang belanja tidak boleh kosong"),
+  discount: z.number().int("Diskon harus berupa bilangan bulat").nonnegative("Diskon tidak boleh negatif").default(0),
+  tax: z.number().int("Pajak harus berupa bilangan bulat").nonnegative("Pajak tidak boleh negatif").default(0),
+  serviceCharge: z.number().int("Service charge harus berupa bilangan bulat").nonnegative("Service charge tidak boleh negatif").default(0),
+  paidAmount: z.number().int("Jumlah pembayaran harus berupa bilangan bulat").nonnegative("Jumlah pembayaran tidak boleh negatif"),
   paymentMethod: z.enum(['cash', 'transfer', 'midtrans_qris']),
   cashSessionId: z.string().optional(),
   idempotencyKey: z.string().optional(),
@@ -48,7 +48,7 @@ export async function POST(request: Request) {
 
     if (!parsed.success) {
       return NextResponse.json(
-        { success: false, message: "Data transaksi tidak valid", errors: parsed.error.issues },
+        { success: false, message: parsed.error.issues[0]?.message || "Data transaksi tidak valid", errors: parsed.error.issues },
         { status: 400 }
       );
     }
@@ -63,22 +63,46 @@ export async function POST(request: Request) {
     const saleId = `sale_${now}_${Math.random().toString(36).substring(2, 7)}`;
     const saleNumber = generateSaleReference();
 
-    // 3. Compute Effective Idempotency Key (Explicit or Automatic 5-second anti-spam window)
-    const itemsFingerprint = payload.lineItems
-      .map(i => `${i.productId}:${i.quantity}:${i.imei || ''}`)
+    // 3. Compute Canonical Request Fingerprint & Idempotency Key
+    const normalizedItemsFingerprint = payload.lineItems
+      .map(i => {
+        const rawImei = i.imei || i.selectedImei;
+        const cleanImei = rawImei ? normalizeImei(rawImei) : '';
+        return `${i.productId}:${i.quantity}:${cleanImei}`;
+      })
       .sort()
       .join('|');
-    const timeBucket = Math.floor(now / 5000);
+
+    const requestFingerprint = [
+      payload.businessId,
+      payload.branchId,
+      authUser.uid,
+      normalizedItemsFingerprint,
+      payload.paidAmount,
+      payload.paymentMethod,
+    ].join('::');
+
     const effectiveIdempotencyKey = payload.idempotencyKey || 
-      `idem_auto_${payload.businessId}_${payload.branchId}_${authUser.uid}_${itemsFingerprint}_${payload.paidAmount}_${timeBucket}`;
+      `idem_auto_${payload.businessId}_${payload.branchId}_${authUser.uid}_${normalizedItemsFingerprint}_${payload.paidAmount}_${Math.floor(now / 5000)}`;
 
     const idemRef = adminDb.doc(`businesses/${payload.businessId}/idempotencyKeys/${effectiveIdempotencyKey}`);
     const idemDoc = await idemRef.get();
     if (idemDoc.exists) {
       const idemData = idemDoc.data();
+      // Reuse key dengan isi berbeda harus ditolak (409 Conflict)
+      if (idemData?.requestFingerprint && idemData.requestFingerprint !== requestFingerprint) {
+        return NextResponse.json(
+          { 
+            success: false, 
+            message: `Idempotency key "${effectiveIdempotencyKey}" telah digunakan untuk transaksi yang berbeda. Gunakan key baru untuk pesanan baru.` 
+          },
+          { status: 409 }
+        );
+      }
       if (idemData?.saleId) {
         const existingSaleDoc = await adminDb.doc(`businesses/${payload.businessId}/sales/${idemData.saleId}`).get();
         if (existingSaleDoc.exists) {
+          // Replay tidak boleh mengurangi stok, menambah sale, atau mengubah kas lagi
           return NextResponse.json({
             success: true,
             sale: existingSaleDoc.data() as Sale,
@@ -91,7 +115,6 @@ export async function POST(request: Request) {
     }
 
     // 4. Determine authoritative payment status
-    // midtrans_qris MUST start as pending until verified by webhook signature
     const paymentStatus: 'paid' | 'pending' = payload.paymentMethod === 'midtrans_qris' ? 'pending' : 'paid';
 
     let newSale: Sale | null = null;
@@ -113,7 +136,12 @@ export async function POST(request: Request) {
         }
       }
 
-      // 1. Read and validate products for authoritative price and stock
+      // 1. Read business document for tax / vertical rules
+      const bizRef = adminDb.doc(`businesses/${payload.businessId}`);
+      const bizDoc = await transaction.get(bizRef);
+      const bizData = bizDoc.exists ? (bizDoc.data() as Business) : null;
+
+      // 2. Read and validate products for authoritative price and stock
       const productDocsMap = new Map<string, FirebaseFirestore.DocumentSnapshot>();
       const productQtyMap = new Map<string, number>();
 
@@ -150,14 +178,19 @@ export async function POST(request: Request) {
         }
       }
 
-      // 2. Read and validate IMEI units (if serialized)
+      // 3. Read and validate Serialized IMEI units with strict invariants
       const imeiDocsMap = new Map<string, { unitRef: FirebaseFirestore.DocumentReference; unitDoc: FirebaseFirestore.DocumentSnapshot }>();
+      const seenUnitIds = new Set<string>();
 
       for (const item of payload.lineItems) {
         const rawImei = item.imei || item.selectedImei;
         if (rawImei) {
+          // Invariant: Quantity must be exactly 1 per IMEI
+          if (item.quantity !== 1) {
+            throw new Error(`Kuantitas untuk produk bernomor IMEI (${item.productName || item.productId}) harus tepat 1 per perangkat.`);
+          }
+
           const imei = normalizeImei(rawImei);
-          // Check registered IMEI doc
           const regRef = adminDb.doc(`businesses/${payload.businessId}/registeredImeis/${imei}`);
           const regDoc = await transaction.get(regRef);
 
@@ -165,7 +198,6 @@ export async function POST(request: Request) {
           if (regDoc.exists && regDoc.data()?.unitId) {
             unitRef = adminDb.doc(`businesses/${payload.businessId}/imeiUnits/${regDoc.data()!.unitId}`);
           } else {
-            // Direct query fallback for existing units
             unitRef = adminDb.doc(`businesses/${payload.businessId}/imeiUnits/${imei}`);
           }
 
@@ -173,20 +205,52 @@ export async function POST(request: Request) {
           if (!unitDoc.exists) {
             throw new Error(`Unit IMEI ${imei} tidak ditemukan di sistem.`);
           }
+
+          const canonicalUnitId = unitDoc.id;
+          // Invariant: IMEI1 / IMEI2 cannot sell the same physical unit twice in one cart
+          if (seenUnitIds.has(canonicalUnitId)) {
+            throw new Error(`Terdapat duplikasi unit IMEI (atau alias IMEI 2 perangkat dual-SIM yang sama) dalam satu transaksi.`);
+          }
+          seenUnitIds.add(canonicalUnitId);
+
           const unitData = unitDoc.data();
           if (unitData?.status !== 'available') {
             throw new Error(`Unit IMEI ${imei} sudah tidak tersedia untuk dijual (status: ${unitData?.status}).`);
           }
+
+          // Invariant: Unit must match requested productId
+          if (unitData?.productId && unitData.productId !== item.productId) {
+            throw new Error(`Unit IMEI ${imei} terdaftar untuk produk "${unitData.productId}", tidak cocok dengan produk pesanan ("${item.productId}").`);
+          }
+
+          // Invariant: Unit must belong to the transaction branch
+          if (unitData?.branchId && unitData.branchId !== payload.branchId) {
+            throw new Error(`Unit IMEI ${imei} berada di cabang ${unitData.branchId}, tidak dapat dijual di cabang transaksi ${payload.branchId}.`);
+          }
+
           imeiDocsMap.set(imei, { unitRef, unitDoc });
         }
       }
 
-      // 3. Read Cash Session if cash payment
+      // 4. Read and validate Cash Session for cash payments
       let shiftDoc: FirebaseFirestore.DocumentSnapshot | null = null;
       let shiftRef: FirebaseFirestore.DocumentReference | null = null;
-      if (payload.paymentMethod === 'cash' && payload.cashSessionId) {
-        shiftRef = adminDb.doc(`businesses/${payload.businessId}/cashSessions/${payload.cashSessionId}`);
-        shiftDoc = await transaction.get(shiftRef);
+      if (payload.paymentMethod === 'cash') {
+        if (payload.cashSessionId) {
+          shiftRef = adminDb.doc(`businesses/${payload.businessId}/cashSessions/${payload.cashSessionId}`);
+          shiftDoc = await transaction.get(shiftRef);
+
+          if (!shiftDoc.exists) {
+            throw new Error("Sesi kasir (shift) tidak ditemukan di sistem.");
+          }
+          const shiftData = shiftDoc.data();
+          if (shiftData?.status !== 'open') {
+            throw new Error("Sesi kasir (shift) telah ditutup. Tidak dapat memproses transaksi tunai pada shift tertutup.");
+          }
+          if (shiftData?.branchId && shiftData.branchId !== payload.branchId) {
+            throw new Error(`Sesi kasir terdaftar untuk cabang ${shiftData.branchId}, bukan cabang transaksi ${payload.branchId}.`);
+          }
+        }
       }
 
       // ----------------------------------------------------
@@ -200,11 +264,12 @@ export async function POST(request: Request) {
         const prodData = prodDoc?.exists ? prodDoc.data() : null;
 
         const imei = item.imei || item.selectedImei;
-        const imeiEntry = imei ? imeiDocsMap.get(imei) : null;
+        const cleanImei = imei ? normalizeImei(imei) : undefined;
+        const imeiEntry = cleanImei ? imeiDocsMap.get(cleanImei) : null;
         const imeiData = imeiEntry?.unitDoc.exists ? imeiEntry.unitDoc.data() : null;
 
-        // Authoritative price: prioritize imei unit price if serialized, else product price
-        const authoritativeUnitPrice = imeiData?.sellingPrice ?? prodData?.sellingPrice ?? item.unitPrice ?? 0;
+        // Authoritative price: Strictly derive from server entity (never fallback to client unitPrice)
+        const authoritativeUnitPrice = imeiData?.sellingPrice ?? prodData?.sellingPrice ?? 0;
         const lineSubtotal = authoritativeUnitPrice * item.quantity;
         authoritativeSubtotal += lineSubtotal;
 
@@ -214,9 +279,25 @@ export async function POST(request: Request) {
           quantity: item.quantity,
           unitPrice: authoritativeUnitPrice,
           subtotal: lineSubtotal,
-          imei: imei,
+          imei: cleanImei,
           notes: item.notes,
         });
+      }
+
+      // Discount Cap and Authority Check
+      if (payload.discount > 0) {
+        if (payload.discount > authoritativeSubtotal) {
+          throw new Error("Diskon tidak boleh melebihi subtotal transaksi.");
+        }
+        const discountPercent = (payload.discount / authoritativeSubtotal) * 100;
+        if (discountPercent > 10) {
+          const canAuthorizeDiscount = membership.role === 'owner' || 
+            membership.role === 'manager' || 
+            membership.permissions.includes('approvals.manage');
+          if (!canAuthorizeDiscount) {
+            throw new Error("Diskon melebihi batas kewenangan kasir (maksimal 10%). Diperlukan persetujuan Manajer atau Owner.");
+          }
+        }
       }
 
       const authoritativeGrandTotal = Math.max(
@@ -226,14 +307,14 @@ export async function POST(request: Request) {
 
       // Validate payment amount for cash sales
       if (payload.paymentMethod === 'cash' && payload.paidAmount < authoritativeGrandTotal) {
-        throw new Error(`Jumlah bayar tunai (Rp ${payload.paidAmount.toLocaleString()}) kurang dari total tagihan (Rp ${authoritativeGrandTotal.toLocaleString()}).`);
+        throw new Error(`Jumlah bayar tunai (Rp ${payload.paidAmount.toLocaleString("id-ID")}) kurang dari total tagihan (Rp ${authoritativeGrandTotal.toLocaleString("id-ID")}).`);
       }
 
       const changeAmount = payload.paymentMethod === 'cash' 
         ? Math.max(0, payload.paidAmount - authoritativeGrandTotal) 
         : 0;
 
-      // Construct final authoritative Sale entity
+      // Construct final authoritative Sale entity (costPrice/HPP is NEVER included in Sale document)
       newSale = {
         id: saleId,
         saleNumber,
@@ -257,7 +338,7 @@ export async function POST(request: Request) {
         paymentStatus,
         orderStatus: (payload.orderType === 'retail_pos' || payload.orderType === 'phone_pos') ? 'served' : 'new',
         cashSessionId: payload.cashSessionId,
-        idempotencyKey: payload.idempotencyKey,
+        idempotencyKey: effectiveIdempotencyKey,
         createdAt: now,
         updatedAt: now,
       };
@@ -328,7 +409,7 @@ export async function POST(request: Request) {
       const saleRef = adminDb.doc(`businesses/${payload.businessId}/sales/${saleId}`);
       transaction.set(saleRef, cleanUndefined(newSale));
 
-      // 4. Update Cash Session if active
+      // 4. Update Cash Session if active cash sale
       if (payload.paymentMethod === 'cash' && shiftDoc && shiftDoc.exists && shiftRef) {
         const shiftData = shiftDoc.data();
         const currentSales = shiftData?.cashSalesTotal ?? 0;
@@ -340,11 +421,14 @@ export async function POST(request: Request) {
         });
       }
 
-      // 5. Store Idempotency Key mapping to prevent subsequent duplicate requests
+      // 5. Store Idempotency Key mapping with canonical request fingerprint
       transaction.set(idemRef, cleanUndefined({
         idempotencyKey: effectiveIdempotencyKey,
         saleId,
         businessId: payload.businessId,
+        branchId: payload.branchId,
+        operatorId: authUser.uid,
+        requestFingerprint,
         grandTotal: authoritativeGrandTotal,
         createdAt: now,
       }));
@@ -361,11 +445,23 @@ export async function POST(request: Request) {
       error.message?.includes('tidak mencukupi') || 
       error.message?.includes('sudah tidak tersedia') ||
       error.message?.includes('tidak aktif') ||
-      error.message?.includes('diarsipkan')
+      error.message?.includes('diarsipkan') ||
+      error.message?.includes('Kuantitas untuk produk bernomor IMEI') ||
+      error.message?.includes('duplikasi unit IMEI') ||
+      error.message?.includes('tidak cocok dengan') ||
+      error.message?.includes('tidak dapat dijual di cabang') ||
+      error.message?.includes('kurang dari total tagihan') ||
+      error.message?.includes('Sesi kasir')
     ) {
       return NextResponse.json(
         { success: false, message: error.message },
         { status: 400 }
+      );
+    }
+    if (error.message?.includes('kewenangan kasir') || error.message?.includes('persetujuan Manajer')) {
+      return NextResponse.json(
+        { success: false, message: error.message },
+        { status: 403 }
       );
     }
     return handleAuthApiError(error);

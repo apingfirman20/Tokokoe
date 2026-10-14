@@ -180,6 +180,27 @@ export async function POST(request: Request) {
 
     await adminDb.doc(`businesses/${payload.businessId}/products/${productId}`).set(dataToWrite);
 
+    // Record authoritative initial StockMovement (opening balance) in ledger
+    if (newProduct.trackStock && newProduct.stockQty > 0) {
+      const movRef = adminDb.collection(`businesses/${payload.businessId}/stockMovements`).doc();
+      await movRef.set({
+        id: movRef.id,
+        businessId: payload.businessId,
+        branchId: 'br_main',
+        productId,
+        productName: newProduct.name,
+        type: 'opening_balance',
+        quantityDelta: newProduct.stockQty,
+        previousQty: 0,
+        newQty: newProduct.stockQty,
+        referenceId: productId,
+        operatorId: authUser.uid,
+        operatorName: membership.displayName,
+        notes: `Saldo awal (opening balance) saat pembuatan produk ${newProduct.name}`,
+        timestamp: Date.now(),
+      });
+    }
+
     return NextResponse.json({
       success: true,
       product: sanitizeProductDto(newProduct, allowedCost),
@@ -276,7 +297,15 @@ export async function PUT(request: Request) {
     if (payload.name !== undefined) updates.name = payload.name;
     if (payload.category !== undefined) updates.category = payload.category;
     if (payload.sellingPrice !== undefined) updates.sellingPrice = payload.sellingPrice;
-    if (payload.stockQty !== undefined) updates.stockQty = payload.stockQty;
+    if (payload.stockQty !== undefined && payload.stockQty !== existingData.stockQty) {
+      return NextResponse.json(
+        { 
+          success: false, 
+          message: "Perubahan jumlah stok tidak boleh dilakukan melalui edit produk langsung tanpa audit trail. Gunakan modul Penyesuaian Stok (Stock Adjustment) atau Penerimaan PO agar tercatat di stock ledger." 
+        },
+        { status: 400 }
+      );
+    }
     if (payload.trackStock !== undefined) updates.trackStock = payload.trackStock;
     if (payload.available !== undefined) updates.available = payload.available;
     if (payload.isActive !== undefined) updates.isActive = payload.isActive;
