@@ -23,6 +23,7 @@ interface PublicBusiness {
   footerMessage?: string;
   taxRate: number;
   serviceChargeRate: number;
+  allowTableQris?: boolean;
 }
 
 interface PublicProduct {
@@ -308,7 +309,7 @@ function CustomerOrderContent({ params }: { params: Promise<{ businessId: string
       return;
     }
 
-    if (paymentChoice === 'qris') {
+    if (paymentChoice === 'qris' && business?.allowTableQris) {
       handleOpenQrisModal();
     } else {
       executeOrderSubmission('cash');
@@ -1108,61 +1109,80 @@ function CustomerOrderContent({ params }: { params: Promise<{ businessId: string
                   <label className="block text-xs font-bold text-slate-800 mb-1.5">
                     Pilihan Pembayaran <span className="text-rose-500">*</span>
                   </label>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setPaymentChoice('cash')}
-                      className={`p-3 rounded-2xl border-2 text-left flex flex-col justify-between transition-all ${
-                        paymentChoice === 'cash'
-                          ? 'border-teal-600 bg-teal-50/70 text-teal-950 shadow-xs'
-                          : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between w-full mb-1">
-                        <div className={`w-7 h-7 rounded-lg flex items-center justify-center ${
-                          paymentChoice === 'cash' ? 'bg-teal-600 text-white' : 'bg-slate-100 text-slate-600'
-                        }`}>
+                  {business?.allowTableQris ? (
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setPaymentChoice('cash')}
+                        className={`p-3 rounded-2xl border-2 text-left flex flex-col justify-between transition-all ${
+                          paymentChoice === 'cash'
+                            ? 'border-teal-600 bg-teal-50/70 text-teal-950 shadow-xs'
+                            : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between w-full mb-1">
+                          <div className={`w-7 h-7 rounded-lg flex items-center justify-center ${
+                            paymentChoice === 'cash' ? 'bg-teal-600 text-white' : 'bg-slate-100 text-slate-600'
+                          }`}>
+                            <Banknote className="w-4 h-4" />
+                          </div>
+                          {paymentChoice === 'cash' && (
+                            <CheckCircle2 className="w-4 h-4 text-teal-600" />
+                          )}
+                        </div>
+                        <div>
+                          <div className="font-bold text-xs">Bayar di Kasir</div>
+                          <div className="text-[10px] text-slate-500 mt-0.5 leading-tight">
+                            Tunai / Bayar di Kasir
+                          </div>
+                        </div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setPaymentChoice('qris')}
+                        className={`p-3 rounded-2xl border-2 text-left flex flex-col justify-between transition-all ${
+                          paymentChoice === 'qris'
+                            ? 'border-teal-600 bg-teal-50/70 text-teal-950 shadow-xs'
+                            : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between w-full mb-1">
+                          <div className={`w-7 h-7 rounded-lg flex items-center justify-center ${
+                            paymentChoice === 'qris' ? 'bg-teal-600 text-white' : 'bg-slate-100 text-slate-600'
+                          }`}>
+                            <QrCodeIcon className="w-4 h-4" />
+                          </div>
+                          {paymentChoice === 'qris' && (
+                            <CheckCircle2 className="w-4 h-4 text-teal-600" />
+                          )}
+                        </div>
+                        <div>
+                          <div className="font-bold text-xs">Bayar via QRIS</div>
+                          <div className="text-[10px] text-slate-500 mt-0.5 leading-tight">
+                            Scan QRIS Digital
+                          </div>
+                        </div>
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="p-3.5 rounded-2xl border-2 border-teal-600 bg-teal-50/70 text-teal-950 flex items-center justify-between shadow-xs">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-xl bg-teal-600 text-white flex items-center justify-center shadow-xs">
                           <Banknote className="w-4 h-4" />
                         </div>
-                        {paymentChoice === 'cash' && (
-                          <CheckCircle2 className="w-4 h-4 text-teal-600" />
-                        )}
-                      </div>
-                      <div>
-                        <div className="font-bold text-xs">Bayar di Kasir</div>
-                        <div className="text-[10px] text-slate-500 mt-0.5 leading-tight">
-                          Tunai / Bayar di Kasir
+                        <div>
+                          <div className="font-bold text-xs">Bayar di Kasir (Tunai / QRIS Toko)</div>
+                          <div className="text-[11px] text-teal-800 mt-0.5">
+                            Pesanan langsung diproses. Pembayaran diselesaikan di meja kasir.
+                          </div>
                         </div>
                       </div>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => setPaymentChoice('qris')}
-                      className={`p-3 rounded-2xl border-2 text-left flex flex-col justify-between transition-all ${
-                        paymentChoice === 'qris'
-                          ? 'border-teal-600 bg-teal-50/70 text-teal-950 shadow-xs'
-                          : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between w-full mb-1">
-                        <div className={`w-7 h-7 rounded-lg flex items-center justify-center ${
-                          paymentChoice === 'qris' ? 'bg-teal-600 text-white' : 'bg-slate-100 text-slate-600'
-                        }`}>
-                          <QrCodeIcon className="w-4 h-4" />
-                        </div>
-                        {paymentChoice === 'qris' && (
-                          <CheckCircle2 className="w-4 h-4 text-teal-600" />
-                        )}
-                      </div>
-                      <div>
-                        <div className="font-bold text-xs">Bayar via QRIS</div>
-                        <div className="text-[10px] text-slate-500 mt-0.5 leading-tight">
-                          Scan QRIS Digital
-                        </div>
-                      </div>
-                    </button>
-                  </div>
+                      <span className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-teal-200/80 text-teal-900 border border-teal-300">
+                        Otomatis
+                      </span>
+                    </div>
+                  )}
                 </div>
               </form>
 
@@ -1193,9 +1213,9 @@ function CustomerOrderContent({ params }: { params: Promise<{ businessId: string
               <div className="p-2.5 bg-amber-50 rounded-xl border border-amber-200 text-[11px] text-amber-800 flex items-center gap-1.5">
                 <HelpCircle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
                 <span>
-                  {paymentChoice === 'qris'
+                  {paymentChoice === 'qris' && business?.allowTableQris
                     ? 'Pesanan dikirim ke kasir dengan status Lunas QRIS sebelum diteruskan ke dapur.'
-                    : 'Pesanan dikirim ke kasir (Bayar di Kasir). Pembayaran tunai/kartu dapat dilakukan di kasir.'}
+                    : 'Pesanan langsung dikirim ke kasir & dapur. Pembayaran tunai / QRIS dapat dilakukan langsung di kasir.'}
                 </span>
               </div>
             </div>

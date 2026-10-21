@@ -66,6 +66,7 @@ export interface MidtransSettings {
   merchantId?: string;
   clientKey?: string;
   serverKey?: string;
+  allowTableQris?: boolean;
 }
 
 export interface Business {

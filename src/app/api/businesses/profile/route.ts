@@ -29,6 +29,7 @@ const midtransSettingsSchema = z.object({
   merchantId: z.string().trim().optional(),
   clientKey: z.string().trim().optional(),
   serverKey: z.string().trim().optional(),
+  allowTableQris: z.boolean().default(true).optional(),
 }).optional();
 
 const updateProfileSchema = z.object({

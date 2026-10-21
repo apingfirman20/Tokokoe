@@ -111,6 +111,7 @@ export default function SettingsPage() {
   const [midtransMerchantId, setMidtransMerchantId] = useState(activeBusiness?.midtransSettings?.merchantId || '');
   const [midtransClientKey, setMidtransClientKey] = useState(activeBusiness?.midtransSettings?.clientKey || '');
   const [midtransServerKey, setMidtransServerKey] = useState(activeBusiness?.midtransSettings?.serverKey || '');
+  const [midtransAllowTableQris, setMidtransAllowTableQris] = useState(activeBusiness?.midtransSettings?.allowTableQris ?? true);
   const [showServerKey, setShowServerKey] = useState(false);
   const [isSavingMidtrans, setIsSavingMidtrans] = useState(false);
   const [midtransFeedback, setMidtransFeedback] = useState<string | null>(null);
@@ -124,6 +125,7 @@ export default function SettingsPage() {
       setMidtransMerchantId(activeBusiness.midtransSettings.merchantId || '');
       setMidtransClientKey(activeBusiness.midtransSettings.clientKey || '');
       setMidtransServerKey(activeBusiness.midtransSettings.serverKey || '');
+      setMidtransAllowTableQris(activeBusiness.midtransSettings.allowTableQris ?? true);
     }
   }, [activeBusiness?.id, activeBusiness?.midtransSettings]);
 
@@ -145,6 +147,7 @@ export default function SettingsPage() {
           merchantId: midtransMerchantId.trim(),
           clientKey: midtransClientKey.trim(),
           serverKey: midtransServerKey.trim(),
+          allowTableQris: midtransAllowTableQris,
         },
       });
 
@@ -1181,15 +1184,16 @@ export default function SettingsPage() {
           </div>
         )}
 
-        {/* Toggle Aktivasi */}
+        {/* Toggle 1: Aktivasi Midtrans Online */}
         <div className="p-4 rounded-xl bg-slate-50 border border-slate-200/80 flex items-center justify-between">
           <div>
-            <div className="text-xs font-bold text-slate-900">Aktifkan Pembayaran QRIS Midtrans</div>
-            <div className="text-[11px] text-slate-500 mt-0.5">
-              Jika aktif, pelanggan dapat scan dan membayar pesanan via QRIS (BCA, GoPay, OVO, ShopeePay, Dana, dll).
+            <div className="text-xs font-bold text-slate-900">Aktifkan Integrasi Midtrans (Online Otomatis)</div>
+            <div className="text-[11px] text-slate-500 mt-0.5 max-w-xl">
+              Jika aktif, sistem dapat menerbitkan QRIS dinamis Midtrans dengan nominal terisi otomatis &amp; deteksi lunas otomatis.
+              Jika dinonaktifkan, kasir tetap dapat menerima pembayaran dengan <strong>QRIS Toko Standar (stiker fisik)</strong> yang langsung tercatat lunas.
             </div>
           </div>
-          <label className="relative inline-flex items-center cursor-pointer">
+          <label className="relative inline-flex items-center cursor-pointer shrink-0 ml-3">
             <input
               type="checkbox"
               checked={midtransEnabled}
@@ -1199,6 +1203,60 @@ export default function SettingsPage() {
             <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
           </label>
         </div>
+
+        {/* Toggle 2: Pembayaran QRIS di Meja Tamu */}
+        <div className={`p-4 rounded-xl border transition-all flex items-center justify-between ${
+          midtransEnabled 
+            ? 'bg-slate-50 border-slate-200/80' 
+            : 'bg-slate-100/60 border-slate-200 opacity-60'
+        }`}>
+          <div>
+            <div className="text-xs font-bold text-slate-900 flex items-center gap-2">
+              <span>Aktifkan Pembayaran QRIS di Meja Tamu (Self-Order Meja)</span>
+              {!midtransEnabled && (
+                <span className="text-[10px] font-semibold text-slate-500 bg-slate-200 px-2 py-0.5 rounded-full">
+                  Perlu Midtrans Aktif
+                </span>
+              )}
+            </div>
+            <div className="text-[11px] text-slate-500 mt-0.5 max-w-xl">
+              Jika dinonaktifkan (atau jika Midtrans nonaktif), pelanggan di meja hanya dapat memilih opsi <strong>"Bayar di Kasir"</strong>. Pilihan bayar QRIS di meja akan disembunyikan.
+            </div>
+          </div>
+          <label className="relative inline-flex items-center cursor-pointer shrink-0 ml-3">
+            <input
+              type="checkbox"
+              disabled={!midtransEnabled}
+              checked={midtransEnabled && midtransAllowTableQris}
+              onChange={(e) => setMidtransAllowTableQris(e.target.checked)}
+              className="sr-only peer disabled:opacity-50"
+            />
+            <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-teal-600"></div>
+          </label>
+        </div>
+
+        {/* Status Mode Banner Info */}
+        {!midtransEnabled ? (
+          <div className="p-3.5 rounded-xl bg-teal-50 border border-teal-200 text-teal-900 text-xs flex items-start gap-2.5">
+            <CheckCircle2 className="w-4 h-4 text-teal-600 shrink-0 mt-0.5" />
+            <div>
+              <span className="font-bold">Mode QRIS Toko Standar Sedang Aktif:</span>
+              <p className="text-[11px] text-teal-800 mt-0.5 leading-relaxed">
+                Karena integrasi online Midtrans dinonaktifkan, kasir akan menggunakan <strong>QRIS Fisik Toko</strong> (stiker BCA, Mandiri, GoPay, DANA, OVO, ShopeePay, dll). Ketika kasir memilih metode QRIS, sistem langsung menjamin transaksi tercatat lunas dan mencetak struk nota tanpa API call. Tamu di meja otomatis hanya dapat memesan dengan opsi <strong>Bayar di Kasir</strong>.
+              </p>
+            </div>
+          </div>
+        ) : (
+          <div className="p-3.5 rounded-xl bg-indigo-50 border border-indigo-200 text-indigo-900 text-xs flex items-start gap-2.5">
+            <Sparkles className="w-4 h-4 text-indigo-600 shrink-0 mt-0.5" />
+            <div>
+              <span className="font-bold">Mode QRIS Dinamis Midtrans Aktif:</span>
+              <p className="text-[11px] text-indigo-800 mt-0.5 leading-relaxed">
+                Sistem akan memanggil Midtrans Core API untuk generate QRIS berbayar otomatis dengan verifikasi uang masuk real-time. Kasir tetap memiliki tombol pintas untuk langsung beralih ke QRIS fisik manual kapan saja.
+              </p>
+            </div>
+          </div>
+        )}
 
         {/* Mode Environment */}
         <div>

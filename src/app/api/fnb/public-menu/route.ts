@@ -96,6 +96,7 @@ export async function GET(request: Request) {
         footerMessage: business.receiptSettings?.footerMessage || "Selamat menikmati sajian kami!",
         taxRate: business.taxRate !== undefined ? business.taxRate : 10, // PB1 default 10%
         serviceChargeRate: business.serviceChargeRate !== undefined ? business.serviceChargeRate : 0,
+        allowTableQris: Boolean(business.midtransSettings?.isEnabled && (business.midtransSettings?.allowTableQris ?? true)),
       },
       categories,
       products: publicProducts,
