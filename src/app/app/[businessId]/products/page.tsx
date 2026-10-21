@@ -4,13 +4,13 @@ import React, { useState } from 'react';
 import { useBusiness } from '@/context/BusinessContext';
 import { useAuth } from '@/context/AuthContext';
 import { Product } from '@/types';
-import { formatRupiah } from '@/lib/utils';
+import { formatRupiah, processProductImageFile } from '@/lib/utils';
 import { hasPermission } from '@/lib/permissions';
 import { validateProductBarcode, checkDuplicateBarcode, detectBarcodeType } from '@/lib/validation/barcode';
 import { 
   Package, Plus, Search, Edit2, Archive, CheckCircle2, 
   X, AlertTriangle, Coffee, Smartphone, ShoppingBag, AlertCircle, Loader2, RotateCcw,
-  ChevronDown, Tag, FolderPlus
+  ChevronDown, Tag, FolderPlus, Upload, Image as ImageIcon, Trash2
 } from 'lucide-react';
 
 export default function ProductsPage() {
@@ -31,6 +31,10 @@ export default function ProductsPage() {
   const [stockQty, setStockQty] = useState<number>(10);
   const [barcode, setBarcode] = useState('');
   const [sku, setSku] = useState('');
+  const [imageUrl, setImageUrl] = useState('');
+  const [isProcessingImage, setIsProcessingImage] = useState(false);
+  const [imageError, setImageError] = useState('');
+  const [showUrlInput, setShowUrlInput] = useState(false);
   const [modalError, setModalError] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [actionFeedback, setActionFeedback] = useState<string | null>(null);
@@ -169,6 +173,10 @@ export default function ProductsPage() {
     setStockQty(20);
     setBarcode('');
     setSku('');
+    setImageUrl('');
+    setIsProcessingImage(false);
+    setImageError('');
+    setShowUrlInput(false);
     setModalError('');
     setShowAddCategoryInline(false);
     setNewCategoryInput('');
@@ -186,8 +194,30 @@ export default function ProductsPage() {
     setStockQty(p.stockQty);
     setBarcode(p.barcode || '');
     setSku(p.sku || '');
+    setImageUrl(p.imageUrl || '');
+    setIsProcessingImage(false);
+    setImageError('');
+    setShowUrlInput(Boolean(p.imageUrl && !p.imageUrl.startsWith('data:')));
     setModalError('');
     setShowAddModal(true);
+  };
+
+  const handleImageFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setImageError('');
+    setIsProcessingImage(true);
+
+    try {
+      const dataUrl = await processProductImageFile(file);
+      setImageUrl(dataUrl);
+    } catch (err: any) {
+      setImageError(err.message || 'Gagal memproses file foto produk.');
+    } finally {
+      setIsProcessingImage(false);
+      e.target.value = '';
+    }
   };
 
   const handleSaveProduct = async (e: React.FormEvent) => {
@@ -236,7 +266,7 @@ export default function ProductsPage() {
     setIsSaving(true);
     try {
       if (editingProduct) {
-        // Explicitly clear barcode / SKU by passing null if cleared by user
+        // Explicitly clear barcode / SKU / imageUrl by passing empty or null if cleared by user
         const res = await updateProduct(editingProduct.id, {
           name: cleanName,
           category: category.trim() || 'Umum',
@@ -245,6 +275,7 @@ export default function ProductsPage() {
           stockQty,
           barcode: cleanBarcode ? cleanBarcode : '',
           sku: cleanSku ? cleanSku : '',
+          imageUrl: imageUrl.trim() ? imageUrl.trim() : '',
         });
 
         if (!res.success) {
@@ -263,6 +294,7 @@ export default function ProductsPage() {
           stockQty,
           barcode: cleanBarcode || undefined,
           sku: cleanSku || undefined,
+          imageUrl: imageUrl.trim() || undefined,
           trackStock: true,
           available: true,
         });
@@ -440,10 +472,31 @@ export default function ProductsPage() {
                 filtered.map((prod) => (
                   <tr key={prod.id} className="hover:bg-slate-50/70 transition-colors">
                     <td className="py-3 px-4 font-semibold text-slate-900">
-                      <div>{prod.name}</div>
-                      {prod.isActive === false && (
-                        <span className="text-[10px] text-rose-600 italic">Diarsipkan (tidak dijual)</span>
-                      )}
+                      <div className="flex items-center gap-3">
+                        {prod.imageUrl ? (
+                          <img
+                            src={prod.imageUrl}
+                            alt={prod.name}
+                            className="w-10 h-10 rounded-xl object-cover border border-slate-200 bg-slate-50 shadow-2xs shrink-0"
+                          />
+                        ) : (
+                          <div className="w-10 h-10 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-400 shrink-0">
+                            {activeBusiness?.businessType === 'phone' ? (
+                              <Smartphone className="w-5 h-5 text-slate-400" />
+                            ) : activeBusiness?.businessType === 'retail' ? (
+                              <ShoppingBag className="w-5 h-5 text-slate-400" />
+                            ) : (
+                              <Coffee className="w-5 h-5 text-slate-400" />
+                            )}
+                          </div>
+                        )}
+                        <div className="min-w-0">
+                          <div className="font-bold text-slate-900 text-xs truncate">{prod.name}</div>
+                          {prod.isActive === false && (
+                            <span className="text-[10px] text-rose-600 italic">Diarsipkan (tidak dijual)</span>
+                          )}
+                        </div>
+                      </div>
                     </td>
                     <td className="py-3 px-4 text-slate-600">
                       <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-700 text-[10px] font-semibold">
@@ -539,6 +592,121 @@ export default function ProductsPage() {
             </div>
 
             <form onSubmit={handleSaveProduct} className="space-y-4">
+              {/* Foto Produk Uploader */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
+                    <ImageIcon className="w-3.5 h-3.5 text-teal-600" />
+                    <span>Foto Produk</span>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setShowUrlInput(!showUrlInput)}
+                    className="text-[11px] font-semibold text-teal-700 hover:text-teal-800 hover:underline"
+                  >
+                    {showUrlInput ? '« Unggah File Gambar' : 'Punya Link Gambar URL? »'}
+                  </button>
+                </div>
+
+                {showUrlInput ? (
+                  <div className="space-y-2">
+                    <input
+                      type="url"
+                      value={imageUrl}
+                      onChange={(e) => setImageUrl(e.target.value)}
+                      placeholder="https://images.unsplash.com/photo-..."
+                      className="w-full text-xs p-2.5 rounded-xl border border-slate-300 outline-none focus:border-teal-500 font-mono"
+                    />
+                    {imageUrl && (
+                      <div className="flex items-center gap-2">
+                        <img src={imageUrl} alt="Preview" className="w-12 h-12 rounded-xl object-cover border border-slate-200" />
+                        <button
+                          type="button"
+                          onClick={() => setImageUrl('')}
+                          className="text-[11px] text-rose-600 hover:underline font-semibold"
+                        >
+                          Hapus Link Foto
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {imageUrl ? (
+                      <div className="p-3 bg-slate-50 border border-slate-200 rounded-2xl flex items-center justify-between gap-3 shadow-2xs">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <img
+                            src={imageUrl}
+                            alt="Preview Produk"
+                            className="w-16 h-16 rounded-xl object-cover border border-slate-300 bg-white shadow-xs shrink-0"
+                          />
+                          <div className="min-w-0">
+                            <span className="text-xs font-bold text-slate-800 block truncate">Foto Produk Terpasang</span>
+                            <span className="text-[11px] text-emerald-600 font-medium block">
+                              ✓ Siap ditampilkan di POS kasir &amp; menu QR meja
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2 shrink-0">
+                          <label className="cursor-pointer px-3 py-1.5 rounded-xl bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 text-xs font-semibold shadow-2xs transition-colors flex items-center gap-1.5">
+                            <Upload className="w-3.5 h-3.5 text-slate-500" />
+                            <span>Ganti</span>
+                            <input
+                              type="file"
+                              accept="image/*"
+                              onChange={handleImageFileChange}
+                              className="hidden"
+                              disabled={isProcessingImage}
+                            />
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => setImageUrl('')}
+                            className="p-1.5 rounded-xl text-rose-600 hover:bg-rose-50 transition-colors"
+                            title="Hapus Foto"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <label className="w-full cursor-pointer flex flex-col items-center justify-center gap-1.5 p-4 rounded-2xl border-2 border-dashed border-teal-300 hover:border-teal-500 bg-teal-50/40 hover:bg-teal-50/80 transition-all text-center group">
+                        <div className="flex items-center gap-2 font-bold text-xs text-teal-900">
+                          {isProcessingImage ? (
+                            <Loader2 className="w-4 h-4 animate-spin text-teal-600" />
+                          ) : (
+                            <Upload className="w-4 h-4 text-teal-600 group-hover:-translate-y-0.5 transition-transform" />
+                          )}
+                          <span>
+                            {isProcessingImage
+                              ? 'Sedang mengompres & memproses foto...'
+                              : 'Unggah Foto Produk dari Perangkat (Galeri / Kamera / File)'}
+                          </span>
+                        </div>
+                        <span className="text-[11px] text-teal-700 font-medium">
+                          Mendukung JPG, PNG, WebP (Otomatis dikompres tajam &amp; ringan untuk layar kasir)
+                        </span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={handleImageFileChange}
+                          className="hidden"
+                          disabled={isProcessingImage}
+                        />
+                      </label>
+                    )}
+
+                    {imageError && (
+                      <p className="text-[11px] text-rose-600 font-semibold flex items-center gap-1">
+                        <AlertCircle className="w-3.5 h-3.5" />
+                        <span>{imageError}</span>
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
                   Nama Produk <span className="text-rose-500">*</span>

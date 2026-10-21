@@ -677,8 +677,18 @@ export function RetailPosScreen() {
                       <button
                         key={prod.id}
                         onClick={() => addToCart(prod)}
-                        className="bg-white p-3 rounded-xl border border-slate-200 shadow-2xs hover:border-emerald-500 hover:shadow-xs text-left transition-all flex flex-col justify-between"
+                        className="bg-white p-3 rounded-xl border border-slate-200 shadow-2xs hover:border-emerald-500 hover:shadow-xs text-left transition-all flex flex-col justify-between group overflow-hidden"
                       >
+                        {prod.imageUrl ? (
+                          <div className="w-full h-24 rounded-lg overflow-hidden bg-slate-100 mb-2 border border-slate-100">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={prod.imageUrl}
+                              alt={prod.name}
+                              className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                            />
+                          </div>
+                        ) : null}
                         <div>
                           <span className="font-semibold text-xs text-slate-900 line-clamp-1">{prod.name}</span>
                           <span className="font-mono text-[10px] text-slate-400">{prod.barcode || prod.sku}</span>
