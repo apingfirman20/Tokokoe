@@ -19,7 +19,7 @@ function getAudioContext(): AudioContext | null {
   return audioCtx;
 }
 
-export type PosSoundEffect = "scan_success" | "scan_error" | "checkout_success" | "key_click";
+export type PosSoundEffect = "scan_success" | "scan_error" | "checkout_success" | "key_click" | "notification";
 
 export function playPosSound(effect: PosSoundEffect) {
   try {
@@ -81,6 +81,21 @@ export function playPosSound(effect: PosSoundEffect) {
       gain.connect(ctx.destination);
       osc.start(now);
       osc.stop(now + 0.03);
+    } else if (effect === "notification") {
+      // Pleasant bell chime for incoming orders (880Hz -> 1320Hz)
+      [880, 1318.51].forEach((freq, idx) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        const start = now + idx * 0.12;
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(freq, start);
+        gain.gain.setValueAtTime(0.15, start);
+        gain.gain.exponentialRampToValueAtTime(0.001, start + 0.35);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(start);
+        osc.stop(start + 0.35);
+      });
     }
   } catch {
     // Non-blocking: fail gracefully if audio context is blocked by browser autoplay policy

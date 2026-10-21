@@ -261,9 +261,9 @@ export interface CartLineItem {
 }
 
 export type OrderType = 'dine_in' | 'takeaway' | 'delivery' | 'retail_pos' | 'phone_pos';
-export type PaymentMethod = 'cash' | 'transfer' | 'midtrans_qris';
+export type PaymentMethod = 'cash' | 'transfer' | 'midtrans_qris' | 'qris';
 export type PaymentStatus = 'paid' | 'pending' | 'failed' | 'cancelled' | 'refunded';
-export type KitchenOrderStatus = 'new' | 'preparing' | 'ready' | 'served' | 'completed';
+export type KitchenOrderStatus = 'waiting_cashier' | 'new' | 'preparing' | 'ready' | 'served' | 'completed';
 
 export interface Sale {
   id: string;

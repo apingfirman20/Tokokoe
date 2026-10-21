@@ -2,11 +2,13 @@
 
 import React, { useState, useEffect, use } from 'react';
 import { useSearchParams } from 'next/navigation';
+import QRCode from 'qrcode';
 import { 
   UtensilsCrossed, ShoppingBag, Plus, Minus, Search, 
   CheckCircle2, Clock, ChefHat, Sparkles, AlertCircle, 
   X, ChevronRight, MessageSquare, ArrowLeft, RefreshCw,
-  Store, MapPin, Phone, HelpCircle
+  Store, MapPin, Phone, HelpCircle, Banknote, QrCode as QrCodeIcon,
+  BellRing, Smartphone, ShieldCheck
 } from 'lucide-react';
 
 interface PublicBusiness {
@@ -84,8 +86,14 @@ function CustomerOrderContent({ params }: { params: Promise<{ businessId: string
   // Order Submission & Tracking
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submittedOrder, setSubmittedOrder] = useState<any | null>(null);
-  const [orderStatus, setOrderStatus] = useState<string>('new');
+  const [orderStatus, setOrderStatus] = useState<string>('waiting_cashier');
   const [isPollingStatus, setIsPollingStatus] = useState(false);
+
+  // Payment Selection State ('cash' = Bayar di Kasir, 'qris' = Bayar via QRIS)
+  const [paymentChoice, setPaymentChoice] = useState<'cash' | 'qris'>('cash');
+  const [showQrisModal, setShowQrisModal] = useState(false);
+  const [qrisDataUrl, setQrisDataUrl] = useState<string>('');
+  const [isGeneratingQris, setIsGeneratingQris] = useState(false);
 
   // 1. Fetch public restaurant menu
   useEffect(() => {
@@ -127,7 +135,7 @@ function CustomerOrderContent({ params }: { params: Promise<{ businessId: string
     }
   }, [businessId, urlTable]);
 
-  // 2. Poll order status if order submitted
+  // 2. Poll order status in real time
   useEffect(() => {
     if (!submittedOrder?.saleId) return;
 
@@ -137,11 +145,19 @@ function CustomerOrderContent({ params }: { params: Promise<{ businessId: string
         const data = await res.json();
         if (data.success && data.sale) {
           setOrderStatus(data.sale.orderStatus);
+          if (data.sale.paymentStatus || data.sale.paymentMethod) {
+            setSubmittedOrder((prev: any) => ({
+              ...prev,
+              paymentStatus: data.sale.paymentStatus,
+              paymentMethod: data.sale.paymentMethod || prev?.paymentMethod,
+              orderStatus: data.sale.orderStatus,
+            }));
+          }
         }
       } catch (e) {
         // silent polling catch
       }
-    }, 5000);
+    }, 4000);
 
     return () => clearInterval(interval);
   }, [submittedOrder?.saleId, businessId]);
@@ -180,8 +196,29 @@ function CustomerOrderContent({ params }: { params: Promise<{ businessId: string
   const serviceCharge = business && business.serviceChargeRate ? Math.round((subtotal * business.serviceChargeRate) / 100) : 0;
   const grandTotal = subtotal + tax + serviceCharge;
 
-  // Submit order to kitchen
-  const handleSubmitOrder = async (e: React.FormEvent) => {
+  // Generate dynamic QRIS code for payment
+  const handleOpenQrisModal = async () => {
+    setIsGeneratingQris(true);
+    setShowQrisModal(true);
+    try {
+      const bizName = (business?.name || 'Tokokoe Resto').slice(0, 20);
+      const payload = `00020101021226680016ID.CO.TOKOKOE.WWW0118936009980000000000520458125303360540${grandTotal}5802ID59${String(bizName.length).padStart(2, '0')}${bizName}6007JAKARTA62070703A016304`;
+      const url = await QRCode.toDataURL(payload, {
+        width: 320,
+        margin: 2,
+        color: { dark: '#0f172a', light: '#ffffff' },
+        errorCorrectionLevel: 'M',
+      });
+      setQrisDataUrl(url);
+    } catch (e) {
+      console.error('Error generating QRIS payload:', e);
+    } finally {
+      setIsGeneratingQris(false);
+    }
+  };
+
+  // Submit trigger from drawer form
+  const handleInitiateOrder = (e: React.FormEvent) => {
     e.preventDefault();
     if (!customerName.trim()) {
       alert('Silakan masukkan nama Anda sebagai pemesan.');
@@ -196,6 +233,15 @@ function CustomerOrderContent({ params }: { params: Promise<{ businessId: string
       return;
     }
 
+    if (paymentChoice === 'qris') {
+      handleOpenQrisModal();
+    } else {
+      executeOrderSubmission('cash');
+    }
+  };
+
+  // Execute submission to backend
+  const executeOrderSubmission = async (method: 'cash' | 'qris') => {
     setIsSubmitting(true);
     try {
       const lineItems = cart.map((item) => ({
@@ -215,6 +261,7 @@ function CustomerOrderContent({ params }: { params: Promise<{ businessId: string
           tableId: selectedTableId || undefined,
           tableNumber: selectedTable,
           customerName: customerName.trim(),
+          paymentMethod: method,
           lineItems,
           notes: orderNotes.trim() || undefined,
         }),
@@ -222,14 +269,18 @@ function CustomerOrderContent({ params }: { params: Promise<{ businessId: string
 
       const data = await res.json();
       if (!res.ok || !data.success) {
-        alert(data.message || 'Gagal mengirim pesanan ke dapur.');
+        alert(data.message || 'Gagal mengirim pesanan ke kasir.');
         return;
       }
 
-      setSubmittedOrder(data);
-      setOrderStatus('new');
+      setSubmittedOrder({
+        ...data,
+        paymentMethod: method,
+      });
+      setOrderStatus(data.orderStatus || 'waiting_cashier');
       setCart([]);
       setShowCartDrawer(false);
+      setShowQrisModal(false);
     } catch (err: any) {
       alert(err.message || 'Terjadi kesalahan sistem saat mengirim pesanan.');
     } finally {
@@ -284,11 +335,57 @@ function CustomerOrderContent({ params }: { params: Promise<{ businessId: string
   if (submittedOrder) {
     const getOrderStatusStep = () => {
       switch (orderStatus) {
-        case 'new': return { step: 1, title: 'Pesanan Diterima Dapur', desc: 'Tiket pesanan Anda telah masuk di layar monitor dapur.', color: 'text-amber-600' };
-        case 'preparing': return { step: 2, title: 'Sedang Dimasak / Diracik', desc: 'Koki dan barista sedang menyiapkan sajian pesanan Anda.', color: 'text-sky-600' };
-        case 'ready': return { step: 3, title: 'Sajian Siap Saji!', desc: 'Pesanan Anda telah selesai dan segera diantar ke meja.', color: 'text-emerald-600' };
-        case 'completed': return { step: 4, title: 'Telah Disajikan', desc: 'Selamat menikmati sajian Anda di restoran kami.', color: 'text-teal-700' };
-        default: return { step: 1, title: 'Pesanan Diterima', desc: 'Sedang diproses oleh staf restoran.', color: 'text-slate-700' };
+        case 'waiting_cashier': 
+          return { 
+            step: 1, 
+            title: 'Menunggu Konfirmasi Kasir', 
+            desc: submittedOrder?.paymentMethod === 'qris'
+              ? 'Pesanan & pembayaran QRIS Anda sedang diverifikasi oleh kasir sebelum diteruskan ke dapur.'
+              : 'Pesanan Anda telah diterima kasir (Bayar di Kasir). Kasir sedang memverifikasi sebelum pesanan diteruskan ke dapur.', 
+            color: 'text-amber-600',
+            badgeBg: 'bg-amber-100 text-amber-800 border-amber-300'
+          };
+        case 'new': 
+          return { 
+            step: 2, 
+            title: 'Diterima Kasir & Diteruskan ke Dapur', 
+            desc: 'Kasir telah memverifikasi pesanan Anda. Tiket kini telah masuk antrean monitor dapur.', 
+            color: 'text-sky-600',
+            badgeBg: 'bg-sky-100 text-sky-800 border-sky-300'
+          };
+        case 'preparing': 
+          return { 
+            step: 3, 
+            title: 'Sedang Dimasak / Diracik', 
+            desc: 'Koki dan barista sedang menyiapkan sajian pesanan Anda.', 
+            color: 'text-indigo-600',
+            badgeBg: 'bg-indigo-100 text-indigo-800 border-indigo-300'
+          };
+        case 'ready': 
+          return { 
+            step: 4, 
+            title: 'Sajian Siap Saji!', 
+            desc: 'Pesanan Anda telah selesai dan segera diantar pelayan ke meja.', 
+            color: 'text-emerald-600',
+            badgeBg: 'bg-emerald-100 text-emerald-800 border-emerald-300'
+          };
+        case 'completed': 
+        case 'served':
+          return { 
+            step: 4, 
+            title: 'Telah Disajikan', 
+            desc: 'Selamat menikmati sajian Anda di restoran kami.', 
+            color: 'text-teal-700',
+            badgeBg: 'bg-teal-100 text-teal-800 border-teal-300'
+          };
+        default: 
+          return { 
+            step: 1, 
+            title: 'Menunggu Kasir', 
+            desc: 'Sedang diproses oleh staf restoran.', 
+            color: 'text-slate-700',
+            badgeBg: 'bg-slate-100 text-slate-800 border-slate-300'
+          };
       }
     };
 
@@ -299,8 +396,14 @@ function CustomerOrderContent({ params }: { params: Promise<{ businessId: string
         <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-md w-full border border-slate-200 shadow-xl space-y-6 text-center">
           {/* Header icon */}
           <div className="relative mx-auto w-16 h-16 bg-teal-50 border border-teal-200 rounded-2xl flex items-center justify-center text-teal-600">
-            <ChefHat className="w-9 h-9" />
-            <span className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-emerald-500 rounded-full flex items-center justify-center text-white text-[10px]">
+            {orderStatus === 'waiting_cashier' ? (
+              <BellRing className="w-9 h-9 text-amber-600 animate-pulse" />
+            ) : orderStatus === 'new' ? (
+              <ChefHat className="w-9 h-9 text-sky-600" />
+            ) : (
+              <CheckCircle2 className="w-9 h-9 text-emerald-600" />
+            )}
+            <span className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-emerald-500 rounded-full flex items-center justify-center text-white text-[10px] font-bold">
               ✓
             </span>
           </div>
@@ -310,15 +413,55 @@ function CustomerOrderContent({ params }: { params: Promise<{ businessId: string
               {submittedOrder.tableNumber} • DINE IN
             </span>
             <h1 className="text-xl font-extrabold text-slate-900 pt-1">
-              Pesanan Berhasil Terkirim!
+              Pesanan Terkirim ke Kasir!
             </h1>
             <p className="text-xs text-slate-500">
-              Terima kasih, <span className="font-bold text-slate-800">{submittedOrder.customerName}</span>. Pesanan Anda langsung diproses dapur.
+              Terima kasih, <span className="font-bold text-slate-800">{submittedOrder.customerName}</span>. Pesanan Anda segera diproses kasir & dapur.
             </p>
           </div>
 
+          {/* 4-Step Progress Indicator */}
+          <div className="grid grid-cols-4 gap-1.5 text-center pt-1">
+            <div className={`p-2 rounded-xl text-[10px] font-bold border transition-all ${
+              orderStatus === 'waiting_cashier' 
+                ? 'bg-amber-100 border-amber-400 text-amber-900 shadow-xs' 
+                : 'bg-emerald-50 border-emerald-200 text-emerald-800'
+            }`}>
+              <div className="text-sm mb-0.5">🔔</div>
+              <div>Kasir</div>
+            </div>
+            <div className={`p-2 rounded-xl text-[10px] font-bold border transition-all ${
+              orderStatus === 'new' 
+                ? 'bg-sky-100 border-sky-400 text-sky-900 shadow-xs' 
+                : orderStatus !== 'waiting_cashier' 
+                ? 'bg-emerald-50 border-emerald-200 text-emerald-800' 
+                : 'bg-slate-50 border-slate-200 text-slate-400'
+            }`}>
+              <div className="text-sm mb-0.5">👨‍🍳</div>
+              <div>Dapur</div>
+            </div>
+            <div className={`p-2 rounded-xl text-[10px] font-bold border transition-all ${
+              orderStatus === 'preparing' 
+                ? 'bg-indigo-100 border-indigo-400 text-indigo-900 shadow-xs' 
+                : (orderStatus === 'ready' || orderStatus === 'served' || orderStatus === 'completed') 
+                ? 'bg-emerald-50 border-emerald-200 text-emerald-800' 
+                : 'bg-slate-50 border-slate-200 text-slate-400'
+            }`}>
+              <div className="text-sm mb-0.5">🍳</div>
+              <div>Dimasak</div>
+            </div>
+            <div className={`p-2 rounded-xl text-[10px] font-bold border transition-all ${
+              (orderStatus === 'ready' || orderStatus === 'served' || orderStatus === 'completed') 
+                ? 'bg-emerald-100 border-emerald-400 text-emerald-900 shadow-xs' 
+                : 'bg-slate-50 border-slate-200 text-slate-400'
+            }`}>
+              <div className="text-sm mb-0.5">🍽️</div>
+              <div>Siap Saji</div>
+            </div>
+          </div>
+
           {/* Ticket ID Box */}
-          <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 space-y-1 text-left">
+          <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 space-y-1.5 text-left">
             <div className="flex justify-between items-center text-xs">
               <span className="text-slate-500">No. Pesanan:</span>
               <span className="font-mono font-bold text-slate-900">{submittedOrder.saleNumber}</span>
@@ -326,6 +469,20 @@ function CustomerOrderContent({ params }: { params: Promise<{ businessId: string
             <div className="flex justify-between items-center text-xs">
               <span className="text-slate-500">Estimasi Total:</span>
               <span className="font-bold text-slate-900">Rp {submittedOrder.grandTotal.toLocaleString('id-ID')}</span>
+            </div>
+            <div className="flex justify-between items-center text-xs pt-1 border-t border-slate-200/80">
+              <span className="text-slate-500">Metode Pembayaran:</span>
+              {submittedOrder.paymentMethod === 'qris' ? (
+                <span className="px-2 py-0.5 rounded-full text-[11px] font-extrabold bg-emerald-100 text-emerald-800 border border-emerald-300 flex items-center gap-1">
+                  <QrCodeIcon className="w-3 h-3" />
+                  <span>Lunas via QRIS</span>
+                </span>
+              ) : (
+                <span className="px-2 py-0.5 rounded-full text-[11px] font-extrabold bg-amber-100 text-amber-800 border border-amber-300 flex items-center gap-1">
+                  <Banknote className="w-3 h-3" />
+                  <span>Bayar di Kasir</span>
+                </span>
+              )}
             </div>
           </div>
 
@@ -343,7 +500,11 @@ function CustomerOrderContent({ params }: { params: Promise<{ businessId: string
           <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-left text-[11px] text-amber-800 flex items-start gap-2">
             <HelpCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
             <div>
-              <span className="font-bold">Info Pembayaran:</span> Pembayaran dapat dilakukan di kasir restoran setelah Anda selesai bersantap.
+              {submittedOrder.paymentMethod === 'qris' ? (
+                <span><span className="font-bold">Status QRIS:</span> Pembayaran QRIS Anda telah diterima sistem dan dalam verifikasi kasir. Koki akan segera memasak pesanan Anda.</span>
+              ) : (
+                <span><span className="font-bold">Info Bayar di Kasir:</span> Kasir telah menerima pesanan Anda. Anda dapat membayar langsung ke kasir saat ini atau setelah selesai bersantap.</span>
+              )}
             </div>
           </div>
 
@@ -650,7 +811,7 @@ function CustomerOrderContent({ params }: { params: Promise<{ businessId: string
               ))}
 
               {/* Form Input: Customer Name & Notes */}
-              <form onSubmit={handleSubmitOrder} id="order-form" className="space-y-3 pt-2">
+              <form onSubmit={handleInitiateOrder} id="order-form" className="space-y-3 pt-2">
                 <div>
                   <label className="block text-xs font-bold text-slate-800 mb-1">
                     Nama Pemesan <span className="text-rose-500">*</span>
@@ -676,6 +837,68 @@ function CustomerOrderContent({ params }: { params: Promise<{ businessId: string
                     placeholder="Contoh: Tolong disajikan bersamaan, es sedikit..."
                     className="w-full text-xs p-2.5 rounded-xl border border-slate-300 outline-none focus:border-teal-500"
                   />
+                </div>
+
+                {/* Metode Pembayaran: Bayar di Kasir vs QRIS */}
+                <div className="pt-1">
+                  <label className="block text-xs font-bold text-slate-800 mb-1.5">
+                    Pilihan Pembayaran <span className="text-rose-500">*</span>
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setPaymentChoice('cash')}
+                      className={`p-3 rounded-2xl border-2 text-left flex flex-col justify-between transition-all ${
+                        paymentChoice === 'cash'
+                          ? 'border-teal-600 bg-teal-50/70 text-teal-950 shadow-xs'
+                          : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between w-full mb-1">
+                        <div className={`w-7 h-7 rounded-lg flex items-center justify-center ${
+                          paymentChoice === 'cash' ? 'bg-teal-600 text-white' : 'bg-slate-100 text-slate-600'
+                        }`}>
+                          <Banknote className="w-4 h-4" />
+                        </div>
+                        {paymentChoice === 'cash' && (
+                          <CheckCircle2 className="w-4 h-4 text-teal-600" />
+                        )}
+                      </div>
+                      <div>
+                        <div className="font-bold text-xs">Bayar di Kasir</div>
+                        <div className="text-[10px] text-slate-500 mt-0.5 leading-tight">
+                          Tunai / Bayar di Kasir
+                        </div>
+                      </div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setPaymentChoice('qris')}
+                      className={`p-3 rounded-2xl border-2 text-left flex flex-col justify-between transition-all ${
+                        paymentChoice === 'qris'
+                          ? 'border-teal-600 bg-teal-50/70 text-teal-950 shadow-xs'
+                          : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between w-full mb-1">
+                        <div className={`w-7 h-7 rounded-lg flex items-center justify-center ${
+                          paymentChoice === 'qris' ? 'bg-teal-600 text-white' : 'bg-slate-100 text-slate-600'
+                        }`}>
+                          <QrCodeIcon className="w-4 h-4" />
+                        </div>
+                        {paymentChoice === 'qris' && (
+                          <CheckCircle2 className="w-4 h-4 text-teal-600" />
+                        )}
+                      </div>
+                      <div>
+                        <div className="font-bold text-xs">Bayar via QRIS</div>
+                        <div className="text-[10px] text-slate-500 mt-0.5 leading-tight">
+                          Scan QRIS Digital
+                        </div>
+                      </div>
+                    </button>
+                  </div>
                 </div>
               </form>
 
@@ -705,7 +928,11 @@ function CustomerOrderContent({ params }: { params: Promise<{ businessId: string
 
               <div className="p-2.5 bg-amber-50 rounded-xl border border-amber-200 text-[11px] text-amber-800 flex items-center gap-1.5">
                 <HelpCircle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                <span>Pesanan akan langsung masuk ke dapur. Pembayaran dilakukan di kasir setelah bersantap.</span>
+                <span>
+                  {paymentChoice === 'qris'
+                    ? 'Pesanan dikirim ke kasir dengan status Lunas QRIS sebelum diteruskan ke dapur.'
+                    : 'Pesanan dikirim ke kasir (Bayar di Kasir). Pembayaran tunai/kartu dapat dilakukan di kasir.'}
+                </span>
               </div>
             </div>
 
@@ -725,13 +952,113 @@ function CustomerOrderContent({ params }: { params: Promise<{ businessId: string
                 className="flex-1 py-3 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs shadow-md transition-all active:scale-98 disabled:opacity-50 flex items-center justify-center gap-2"
               >
                 {isSubmitting ? (
-                  <span>Mengirim ke Dapur...</span>
+                  <span>Mengirim Pesanan...</span>
+                ) : paymentChoice === 'qris' ? (
+                  <>
+                    <QrCodeIcon className="w-4 h-4" />
+                    <span>Lanjut Bayar QRIS 🚀</span>
+                  </>
                 ) : (
                   <>
-                    <ChefHat className="w-4 h-4" />
-                    <span>Kirim Pesanan ke Dapur 🚀</span>
+                    <Banknote className="w-4 h-4" />
+                    <span>Kirim Pesanan ke Kasir 🚀</span>
                   </>
                 )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* QRIS Interactive Payment Modal */}
+      {showQrisModal && (
+        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-xs z-60 flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-slate-200 space-y-4 text-center animate-in zoom-in-95">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+              <div className="flex items-center gap-1.5 text-xs font-bold text-slate-800">
+                <QrCodeIcon className="w-4 h-4 text-rose-600" />
+                <span>QRIS Pembayaran Digital</span>
+              </div>
+              <button
+                onClick={() => setShowQrisModal(false)}
+                className="w-7 h-7 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-0.5">
+              <h3 className="font-extrabold text-slate-900 text-base">{business.name}</h3>
+              <p className="text-xs text-slate-500">{selectedTable} • Self-Order Meja</p>
+            </div>
+
+            {/* QRIS Code Box */}
+            <div className="p-3 bg-slate-50 rounded-2xl border-2 border-slate-900 mx-auto max-w-[260px] space-y-2">
+              <div className="text-[10px] font-black tracking-widest text-slate-800 bg-white py-0.5 px-2 rounded border border-slate-200 uppercase">
+                QRIS STANDAR NASIONAL
+              </div>
+              <div className="p-2 bg-white rounded-xl shadow-xs">
+                {qrisDataUrl ? (
+                  <img src={qrisDataUrl} alt="QRIS Code" className="w-44 h-44 mx-auto object-contain" />
+                ) : (
+                  <div className="w-44 h-44 flex items-center justify-center text-xs text-slate-400">
+                    Menyiapkan QRIS...
+                  </div>
+                )}
+              </div>
+              <div className="text-[10px] text-slate-500 font-semibold">
+                NMID: ID1020038892110
+              </div>
+            </div>
+
+            {/* Total Amount to Pay */}
+            <div className="p-2.5 rounded-xl bg-teal-50 border border-teal-200">
+              <div className="text-[11px] text-teal-700 font-medium">Total Pembayaran QRIS:</div>
+              <div className="text-xl font-extrabold text-teal-900">
+                Rp {grandTotal.toLocaleString('id-ID')}
+              </div>
+            </div>
+
+            {/* Supported Payment Providers */}
+            <div className="text-[10px] text-slate-500 space-y-1">
+              <div>Scan dengan m-Banking &amp; E-Wallet:</div>
+              <div className="font-bold text-slate-700 flex flex-wrap justify-center gap-1 text-[10px]">
+                <span className="bg-slate-100 px-1.5 py-0.5 rounded">BCA</span>
+                <span className="bg-slate-100 px-1.5 py-0.5 rounded">Mandiri</span>
+                <span className="bg-slate-100 px-1.5 py-0.5 rounded">GoPay</span>
+                <span className="bg-slate-100 px-1.5 py-0.5 rounded">OVO</span>
+                <span className="bg-slate-100 px-1.5 py-0.5 rounded">DANA</span>
+                <span className="bg-slate-100 px-1.5 py-0.5 rounded">ShopeePay</span>
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div className="space-y-2 pt-1">
+              <button
+                type="button"
+                disabled={isSubmitting}
+                onClick={() => executeOrderSubmission('qris')}
+                className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-md transition-all active:scale-98 flex items-center justify-center gap-2"
+              >
+                {isSubmitting ? (
+                  <span>Memproses Pesanan...</span>
+                ) : (
+                  <>
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>Saya Sudah Bayar via QRIS 🚀</span>
+                  </>
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setShowQrisModal(false);
+                  setPaymentChoice('cash');
+                }}
+                className="w-full py-1.5 text-xs font-semibold text-slate-500 hover:text-slate-800"
+              >
+                Ubah ke Bayar di Kasir (Tunai)
               </button>
             </div>
           </div>

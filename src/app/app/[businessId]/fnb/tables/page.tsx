@@ -4,10 +4,11 @@ import React, { useState, useEffect } from 'react';
 import { useBusiness } from '@/context/BusinessContext';
 import { TableItem } from '@/types';
 import QRCode from 'qrcode';
+import { generateQrWithLogo } from '@/lib/qr-generator';
 import { 
   UtensilsCrossed, Users, CheckCircle2, Clock, X, User, Plus, 
   Trash2, LayoutGrid, QrCode, Printer, ExternalLink, Copy, Check, 
-  Download, Sparkles, ChefHat, AlertCircle, ShoppingBag, Eye
+  Download, Sparkles, ChefHat, AlertCircle, ShoppingBag, Eye, Image as ImageIcon
 } from 'lucide-react';
 
 export default function TablesPage() {
@@ -34,27 +35,33 @@ export default function TablesPage() {
 
   const currentTbl = tables.find(t => t.id === selectedTable);
 
-  // Generate QR Code for single selected table
+  // Logo sesuai nota atau logo bisnis
+  const storeLogo = activeBusiness?.receiptSettings?.logoUrl || activeBusiness?.logoUrl || null;
+
+  // Generate QR Code for single selected table (with restaurant logo in center)
   useEffect(() => {
     if (qrTable && activeBusiness) {
       const origin = typeof window !== 'undefined' ? window.location.origin : '';
       const orderUrl = `${origin}/order/${activeBusiness.id}?table=${encodeURIComponent(qrTable.tableNumber)}&tableId=${encodeURIComponent(qrTable.id)}`;
       
-      QRCode.toDataURL(orderUrl, {
-        width: 360,
+      generateQrWithLogo(orderUrl, storeLogo, {
+        width: 380,
         margin: 2,
-        color: { dark: '#0f172a', light: '#ffffff' },
-        errorCorrectionLevel: 'H',
+        badgeRatio: 0.24,
       })
         .then((url) => setQrDataUrl(url))
-        .catch((err) => console.error('Failed to generate QR code:', err));
+        .catch((err) => {
+          console.error('Failed to generate QR code with logo:', err);
+          QRCode.toDataURL(orderUrl, { width: 360, margin: 2, errorCorrectionLevel: 'H' })
+            .then(u => setQrDataUrl(u));
+        });
     } else {
       setQrDataUrl('');
       setShowPrintTent(false);
     }
-  }, [qrTable, activeBusiness]);
+  }, [qrTable, activeBusiness, storeLogo]);
 
-  // Generate QR Code for all tables (Batch Print)
+  // Generate QR Code for all tables (Batch Print) with restaurant logo in center
   const handleOpenBatchPrint = async () => {
     if (!activeBusiness) return;
     setIsGeneratingAllQr(true);
@@ -64,11 +71,10 @@ export default function TablesPage() {
     try {
       for (const tbl of tables) {
         const orderUrl = `${origin}/order/${activeBusiness.id}?table=${encodeURIComponent(tbl.tableNumber)}&tableId=${encodeURIComponent(tbl.id)}`;
-        map[tbl.id] = await QRCode.toDataURL(orderUrl, {
-          width: 300,
+        map[tbl.id] = await generateQrWithLogo(orderUrl, storeLogo, {
+          width: 320,
           margin: 2,
-          color: { dark: '#0f172a', light: '#ffffff' },
-          errorCorrectionLevel: 'H',
+          badgeRatio: 0.24,
         });
       }
       setAllQrMap(map);

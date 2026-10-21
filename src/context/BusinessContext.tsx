@@ -4,7 +4,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback, use
 import { 
   Business, Branch, Product, ImeiUnit, ImeiHistory, 
   Sale, CashSession, TableItem, BusinessMember, 
-  CartLineItem, OrderType, PaymentMethod, BusinessType,
+  CartLineItem, OrderType, PaymentMethod, PaymentStatus, BusinessType,
   KitchenOrderStatus, UserRole, PermissionKey,
   StockAdjustment, PurchaseOrder, HeldCart, ReceiptSettings
 } from '@/types';
@@ -101,7 +101,7 @@ interface BusinessContextType {
   }) => Promise<{ success: boolean; sale?: Sale; error?: string }>;
   addItemsToFnBOrder: (saleId: string, lineItems: CartLineItem[]) => Promise<{ success: boolean; sale?: Sale; error?: string }>;
   cancelFnBOrder: (saleId: string, reason: string) => Promise<{ success: boolean; error?: string }>;
-  updateOrderStatus: (saleId: string, status: KitchenOrderStatus) => Promise<void>;
+  updateOrderStatus: (saleId: string, status: KitchenOrderStatus, paymentStatus?: PaymentStatus, paidAmount?: number) => Promise<void>;
   requestStockAdjustment: (data: {
     productId: string;
     productName: string;
@@ -1678,7 +1678,12 @@ export function BusinessProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const updateOrderStatus = async (saleId: string, status: KitchenOrderStatus) => {
+  const updateOrderStatus = async (
+    saleId: string, 
+    status: KitchenOrderStatus, 
+    paymentStatus?: PaymentStatus, 
+    paidAmount?: number
+  ) => {
     try {
       const token = await getIdToken();
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -1692,6 +1697,8 @@ export function BusinessProvider({ children }: { children: React.ReactNode }) {
           branchId: activeBranch?.id || 'br_main',
           saleId,
           orderStatus: status,
+          paymentStatus,
+          paidAmount,
         }),
       });
     } catch (e) {
@@ -1700,7 +1707,15 @@ export function BusinessProvider({ children }: { children: React.ReactNode }) {
 
     setStoreData(prev => {
       const updatedSales = prev.sales.map(s => 
-        s.id === saleId ? { ...s, orderStatus: status, updatedAt: Date.now() } : s
+        s.id === saleId 
+          ? { 
+              ...s, 
+              orderStatus: status, 
+              ...(paymentStatus ? { paymentStatus } : {}),
+              ...(paidAmount !== undefined ? { paidAmount, changeAmount: Math.max(0, paidAmount - s.grandTotal) } : {}),
+              updatedAt: Date.now() 
+            } 
+          : s
       );
       const nextStore = { ...prev, sales: updatedSales };
       saveStore(nextStore, user?.uid, !canViewCostPrice);

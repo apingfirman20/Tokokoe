@@ -9,7 +9,8 @@ import {
   Coffee, Search, Plus, Minus, Trash2, CreditCard, 
   Banknote, Receipt, CheckCircle2, Clock, X, ChefHat, 
   UtensilsCrossed, AlertCircle, Printer, RotateCcw, ArrowDownLeft,
-  ChevronRight, SlidersHorizontal, Users, MoreHorizontal, Sparkles
+  ChevronRight, SlidersHorizontal, Users, MoreHorizontal, Sparkles,
+  BellRing, QrCode as QrCodeIcon
 } from 'lucide-react';
 import { ReceiptModal } from './ReceiptModal';
 import { playPosSound } from '@/lib/audio';
@@ -20,6 +21,8 @@ export function FnBPosScreen() {
     activeBranch, 
     products, 
     tables, 
+    sales,
+    updateOrderStatus,
     activeShift, 
     openShift, 
     closeShift, 
@@ -61,6 +64,46 @@ export function FnBPosScreen() {
   const [showMergeModal, setShowMergeModal] = useState(false);
   const [targetTableId, setTargetTableId] = useState('');
   const [tableActionLoading, setTableActionLoading] = useState(false);
+
+  // Incoming QR Table Orders States (Self-Order awaiting Cashier confirmation)
+  const [showIncomingOrdersModal, setShowIncomingOrdersModal] = useState(false);
+  const [forwardingSaleId, setForwardingSaleId] = useState<string | null>(null);
+
+  const incomingSelfOrders = React.useMemo(() => {
+    return (sales || []).filter(
+      s => s.businessId === activeBusiness?.id && s.orderStatus === 'waiting_cashier'
+    );
+  }, [sales, activeBusiness?.id]);
+
+  // Audio notification when new customer QR order arrives
+  const prevIncomingCountRef = React.useRef(incomingSelfOrders.length);
+  React.useEffect(() => {
+    if (incomingSelfOrders.length > prevIncomingCountRef.current) {
+      playPosSound('notification');
+    }
+    prevIncomingCountRef.current = incomingSelfOrders.length;
+  }, [incomingSelfOrders.length]);
+
+  const handleForwardToKitchen = async (sale: Sale, markAsPaid?: boolean) => {
+    setForwardingSaleId(sale.id);
+    try {
+      if (markAsPaid) {
+        await updateOrderStatus(sale.id, 'new', 'paid', sale.grandTotal);
+      } else {
+        await updateOrderStatus(sale.id, 'new');
+      }
+      playPosSound('checkout_success');
+      setOrderFeedbackMsg(`Pesanan ${sale.tableNumber || 'Meja'} (${sale.customerName || 'Tamu'}) berhasil diteruskan ke Dapur 👨‍🍳!`);
+      setTimeout(() => setOrderFeedbackMsg(''), 4500);
+      if (incomingSelfOrders.length <= 1) {
+        setShowIncomingOrdersModal(false);
+      }
+    } catch (err: any) {
+      alert(err.message || 'Gagal meneruskan pesanan ke dapur.');
+    } finally {
+      setForwardingSaleId(null);
+    }
+  };
 
   // Cash payment calculation state
   const [paidAmount, setPaidAmount] = useState<number>(0);
@@ -411,6 +454,17 @@ export function FnBPosScreen() {
 
         {/* Action Buttons */}
         <div className="flex items-center gap-2.5">
+          {incomingSelfOrders.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowIncomingOrdersModal(true)}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold shadow-md animate-pulse transition-all active:scale-95"
+            >
+              <BellRing className="w-3.5 h-3.5 animate-bounce" />
+              <span>{incomingSelfOrders.length} Pesanan Meja Masuk!</span>
+            </button>
+          )}
+
           {/* Order Type Toggle */}
           <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200/80 text-xs font-semibold">
             <button
@@ -458,6 +512,36 @@ export function FnBPosScreen() {
           )}
         </div>
       </section>
+
+      {/* Incoming QR Table Orders Alert Banner */}
+      {incomingSelfOrders.length > 0 && (
+        <div className="bg-gradient-to-r from-amber-500/15 via-amber-500/10 to-orange-500/15 border-2 border-amber-400 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3 shadow-xs animate-in slide-in-from-top-2">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-amber-500 text-white flex items-center justify-center shadow-xs shrink-0 animate-bounce">
+              <BellRing className="w-5 h-5" />
+            </div>
+            <div>
+              <h4 className="font-extrabold text-sm text-slate-900 flex items-center gap-2">
+                <span>Ada {incomingSelfOrders.length} Pesanan Baru dari Meja QR!</span>
+                <span className="text-[10px] bg-amber-600 text-white px-2.5 py-0.5 rounded-full font-bold uppercase tracking-wider">
+                  Menunggu Konfirmasi Kasir
+                </span>
+              </h4>
+              <p className="text-xs text-slate-600 mt-0.5">
+                Pelanggan telah scan QR meja &amp; checkout. Periksa metode pembayaran (Bayar di Kasir / QRIS) sebelum diteruskan ke dapur.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowIncomingOrdersModal(true)}
+            className="py-2.5 px-4 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-extrabold text-xs shadow-md transition-all flex items-center gap-1.5 active:scale-95"
+          >
+            <span>Lihat &amp; Teruskan ke Dapur 👨‍🍳</span>
+            <ChevronRight className="w-4 h-4" />
+          </button>
+        </div>
+      )}
 
       {/* 2. POS MAIN STAGE: Split Layout */}
       <div className="grid grid-cols-12 gap-5 items-start">
@@ -1490,6 +1574,154 @@ export function FnBPosScreen() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* 6. INCOMING QR TABLE SELF-ORDERS MODAL */}
+      {showIncomingOrdersModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-3xl max-w-2xl w-full max-h-[90vh] flex flex-col p-6 shadow-2xl border border-slate-200 overflow-hidden animate-in zoom-in-95">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div>
+                <h3 className="font-extrabold text-base text-slate-900 flex items-center gap-2">
+                  <BellRing className="w-5 h-5 text-amber-500 animate-bounce" />
+                  <span>Pesanan Meja Masuk ({incomingSelfOrders.length})</span>
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Pesanan mandiri pelanggan via scan QR meja. Pilih tindakan untuk meneruskan ke dapur.
+                </p>
+              </div>
+              <button
+                onClick={() => setShowIncomingOrdersModal(false)}
+                className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="overflow-y-auto space-y-3.5 py-4 flex-1">
+              {incomingSelfOrders.length === 0 ? (
+                <div className="text-center py-12 text-slate-400">
+                  <CheckCircle2 className="w-12 h-12 text-emerald-500 mx-auto mb-2" />
+                  <p className="text-sm font-bold text-slate-700">Semua pesanan meja telah diteruskan ke dapur!</p>
+                  <p className="text-xs text-slate-400 mt-0.5">Tidak ada antrean pesanan baru yang menunggu kasir.</p>
+                </div>
+              ) : (
+                incomingSelfOrders.map((order) => {
+                  const isQris = order.paymentMethod === 'qris';
+                  const isProcessingThis = forwardingSaleId === order.id;
+
+                  return (
+                    <div
+                      key={order.id}
+                      className="p-4 rounded-2xl border-2 border-slate-200 bg-slate-50/70 space-y-3 hover:border-amber-400 transition-all"
+                    >
+                      {/* Header Order Card */}
+                      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200/80 pb-2.5">
+                        <div className="flex items-center gap-2">
+                          <span className="px-2.5 py-1 rounded-xl bg-slate-900 text-white font-extrabold text-xs tracking-wider">
+                            {order.tableNumber || 'Meja'}
+                          </span>
+                          <div>
+                            <span className="font-extrabold text-xs text-slate-900">
+                              {order.customerName || 'Tamu Restoran'}
+                            </span>
+                            <span className="text-[10px] text-slate-400 font-mono ml-2">
+                              {order.saleNumber}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Payment Status Tag */}
+                        <div>
+                          {isQris ? (
+                            <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 flex items-center gap-1.5 shadow-2xs">
+                              <QrCodeIcon className="w-3.5 h-3.5 text-emerald-600" />
+                              <span>Lunas via QRIS</span>
+                            </span>
+                          ) : (
+                            <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-900 border border-amber-300 flex items-center gap-1.5 shadow-2xs">
+                              <Banknote className="w-3.5 h-3.5 text-amber-700" />
+                              <span>Bayar di Kasir (Unpaid)</span>
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Items List */}
+                      <div className="space-y-1.5">
+                        {order.lineItems.map((item, idx) => (
+                          <div key={idx} className="flex justify-between items-start text-xs text-slate-800">
+                            <div>
+                              <span className="font-bold">{item.quantity}x</span> {item.productName}
+                              {item.selectedOptions && Object.keys(item.selectedOptions).length > 0 && (
+                                <span className="text-[11px] text-teal-700 ml-1.5">
+                                  ({Object.values(item.selectedOptions).join(', ')})
+                                </span>
+                              )}
+                              {item.notes && (
+                                <div className="text-[10px] text-amber-800 italic pl-4">
+                                  Catatan: {item.notes}
+                                </div>
+                              )}
+                            </div>
+                            <span className="font-bold text-slate-700 shrink-0">
+                              Rp {item.subtotal.toLocaleString('id-ID')}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Total & Action Buttons */}
+                      <div className="pt-2 border-t border-slate-200/80 flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <div className="text-[10px] text-slate-500 font-medium">Total Pesanan:</div>
+                          <div className="text-sm font-extrabold text-slate-900">
+                            Rp {order.grandTotal.toLocaleString('id-ID')}
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          {!isQris && (
+                            <button
+                              type="button"
+                              disabled={isProcessingThis}
+                              onClick={() => handleForwardToKitchen(order, true)}
+                              className="py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs transition-all flex items-center gap-1.5 active:scale-95 disabled:opacity-50"
+                              title="Terima pembayaran tunai langsung di kasir dan kirim ke dapur"
+                            >
+                              <Banknote className="w-3.5 h-3.5" />
+                              <span>Terima Tunai (Lunas) &amp; Kirim Dapur</span>
+                            </button>
+                          )}
+
+                          <button
+                            type="button"
+                            disabled={isProcessingThis}
+                            onClick={() => handleForwardToKitchen(order, false)}
+                            className="py-2 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-md transition-all flex items-center gap-1.5 active:scale-95 disabled:opacity-50"
+                          >
+                            <ChefHat className="w-3.5 h-3.5 text-teal-400" />
+                            <span>{isProcessingThis ? 'Meneruskan...' : 'Teruskan ke Dapur 👨‍🍳'}</span>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            <div className="pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
+              <span>💡 KDS Dapur baru akan menampilkan pesanan setelah kasir mengklik tombol Teruskan ke Dapur.</span>
+              <button
+                onClick={() => setShowIncomingOrdersModal(false)}
+                className="py-1.5 px-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold"
+              >
+                Tutup
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -9,7 +9,10 @@ export default function KitchenPage() {
   const { sales, updateOrderStatus, activeBusiness } = useBusiness();
   const businessId = activeBusiness?.id || 'biz_kopi_senja';
 
-  const kitchenSales = sales.filter(s => s.businessId === businessId && s.orderStatus !== 'completed');
+  // Orders must be approved/forwarded by Cashier first (waiting_cashier is hidden from Kitchen)
+  const kitchenSales = sales.filter(
+    s => s.businessId === businessId && s.orderStatus !== 'completed' && s.orderStatus !== 'waiting_cashier'
+  );
 
   const getStatusColor = (status: KitchenOrderStatus) => {
     switch (status) {

@@ -13,7 +13,9 @@ const updateKdsStatusSchema = z.object({
   businessId: z.string().min(1),
   branchId: z.string().min(1),
   saleId: z.string().min(1),
-  orderStatus: z.enum(['new', 'preparing', 'ready', 'served', 'completed']),
+  orderStatus: z.enum(['waiting_cashier', 'new', 'preparing', 'ready', 'served', 'completed']),
+  paymentStatus: z.enum(['paid', 'pending', 'failed', 'cancelled', 'refunded']).optional(),
+  paidAmount: z.number().optional(),
 });
 
 export async function GET(request: Request) {
@@ -104,11 +106,19 @@ export async function PATCH(request: Request) {
 
     const now = Date.now();
 
-    // Separation of concerns: Updating kitchen completion status does NOT alter paymentStatus or close the bill/table!
-    await saleRef.update({
+    const updateData: Record<string, any> = {
       orderStatus,
       updatedAt: now,
-    });
+    };
+
+    if (parsed.data.paymentStatus) {
+      updateData.paymentStatus = parsed.data.paymentStatus;
+      if (parsed.data.paidAmount !== undefined) {
+        updateData.paidAmount = parsed.data.paidAmount;
+      }
+    }
+
+    await saleRef.update(updateData);
 
     return NextResponse.json({
       success: true,

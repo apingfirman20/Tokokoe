@@ -222,11 +222,13 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
     }
   };
 
-  const paymentMethodLabel = {
+  const paymentMethodMap: Record<string, string> = {
     cash: 'TUNAI (CASH)',
     transfer: 'TRANSFER BANK',
     midtrans_qris: 'QRIS (MIDTRANS)',
-  }[sale.paymentMethod] || sale.paymentMethod.toUpperCase();
+    qris: 'QRIS (DIGITAL)',
+  };
+  const paymentMethodLabel = paymentMethodMap[sale.paymentMethod] || String(sale.paymentMethod).toUpperCase();
 
   const paymentStatusLabel = {
     paid: 'LUNAS (SETTLED)',

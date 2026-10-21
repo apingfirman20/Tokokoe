@@ -19,6 +19,7 @@ const submitCustomerOrderSchema = z.object({
   tableId: z.string().optional(),
   tableNumber: z.string().min(1, "Nomor meja wajib dipilih/diisi"),
   customerName: z.string().trim().min(1, "Nama pemesan wajib diisi"),
+  paymentMethod: z.enum(['cash', 'qris']).default('cash'),
   lineItems: z.array(customerOrderItemSchema).min(1, "Minimal 1 menu harus dipilih."),
   notes: z.string().optional(),
 });
@@ -35,7 +36,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const { businessId, tableId, tableNumber, customerName, lineItems, notes } = parsed.data;
+    const { businessId, tableId, tableNumber, customerName, paymentMethod, lineItems, notes } = parsed.data;
 
     // 1. Verify business existence and F&B type
     const bizDoc = await adminDb.doc(`businesses/${businessId}`).get();
@@ -89,6 +90,7 @@ export async function POST(request: Request) {
     }
 
     // 3. Create Sale record
+    const isQris = paymentMethod === "qris";
     const newSale: Sale = {
       id: saleRef.id,
       saleNumber,
@@ -106,12 +108,14 @@ export async function POST(request: Request) {
       tax,
       serviceCharge,
       grandTotal,
-      paidAmount: 0,
+      paidAmount: isQris ? grandTotal : 0,
       changeAmount: 0,
-      paymentMethod: "cash",
-      paymentStatus: "pending", // Unpaid open bill, to be settled at cashier
-      orderStatus: "new", // Immediately alerts the Kitchen KDS!
-      notes: notes?.trim() ? `[Pesan Mandiri QR Meja] ${notes.trim()}` : "[Pesan Mandiri QR Meja]",
+      paymentMethod: isQris ? "qris" : "cash",
+      paymentStatus: isQris ? "paid" : "pending",
+      orderStatus: "waiting_cashier", // Kasir menerima & verifikasi sebelum lanjut ke dapur
+      notes: notes?.trim() 
+        ? `[Self-Order QR - ${isQris ? 'Lunas via QRIS' : 'Bayar di Kasir'}] ${notes.trim()}` 
+        : `[Self-Order QR - ${isQris ? 'Lunas via QRIS' : 'Bayar di Kasir'}]`,
       createdAt: now,
       updatedAt: now,
     };
@@ -139,8 +143,10 @@ export async function POST(request: Request) {
       tableNumber,
       customerName: customerName.trim(),
       grandTotal,
-      orderStatus: "new",
-      message: "Pesanan berhasil dikirim ke dapur!",
+      paymentMethod: isQris ? "qris" : "cash",
+      paymentStatus: isQris ? "paid" : "pending",
+      orderStatus: "waiting_cashier",
+      message: "Pesanan berhasil dikirim ke kasir! Menunggu konfirmasi kasir sebelum diteruskan ke dapur.",
     });
   } catch (error: any) {
     console.error("Error creating customer QR order:", error);
@@ -183,6 +189,7 @@ export async function GET(request: Request) {
         customerName: sale.customerName,
         orderStatus: sale.orderStatus,
         paymentStatus: sale.paymentStatus,
+        paymentMethod: sale.paymentMethod,
         lineItems: sale.lineItems,
         subtotal: sale.subtotal,
         tax: sale.tax,
