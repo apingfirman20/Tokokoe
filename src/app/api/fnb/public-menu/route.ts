@@ -36,6 +36,16 @@ export async function GET(request: Request) {
       );
     }
 
+    if (business.enabledModules && !business.enabledModules.includes("fnb.tables")) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Fitur pemesanan meja (dine-in) sedang dinonaktifkan oleh pemilik restoran.",
+        },
+        { status: 403 }
+      );
+    }
+
     // 3. Fetch active products
     const productsSnap = await adminDb
       .collection(`businesses/${businessId}/products`)

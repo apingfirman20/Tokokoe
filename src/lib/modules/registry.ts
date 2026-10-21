@@ -215,8 +215,9 @@ export function getNavigationForUser(
   customPermissions?: PermissionKey[]
 ): NavigationItem[] {
   const items: NavigationItem[] = [];
+  const activeModules = Array.isArray(enabledModules) ? enabledModules : (DEFAULT_MODULES_BY_TYPE[businessType] || []);
 
-  for (const modId of enabledModules) {
+  for (const modId of activeModules) {
     const mod = MODULE_REGISTRY[modId];
     if (!mod) continue;
     if (!mod.allowedBusinessTypes.includes(businessType)) continue;

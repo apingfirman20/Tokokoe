@@ -39,7 +39,7 @@ interface BusinessContextType {
   switchBranch: (branchId: string) => void;
   isOnline: boolean;
   createBusiness: (name: string, businessType: BusinessType, address: string, phone: string) => Promise<Business>;
-  updateBusinessProfile: (businessId: string, updates: { name: string; address?: string; phone?: string; logoUrl?: string; receiptSettings?: ReceiptSettings; midtransSettings?: MidtransSettings }) => Promise<{ success: boolean; business?: Business; error?: string }>;
+  updateBusinessProfile: (businessId: string, updates: { name: string; address?: string; phone?: string; logoUrl?: string; receiptSettings?: ReceiptSettings; midtransSettings?: MidtransSettings; enabledModules?: string[] }) => Promise<{ success: boolean; business?: Business; error?: string }>;
   createBranch: (name: string, address: string, phone?: string) => Promise<{ success: boolean; branch?: Branch; error?: string }>;
   updateBranch: (branchId: string, updates: Partial<Branch>) => Promise<{ success: boolean; branch?: Branch; error?: string }>;
   deactivateBranch: (branchId: string) => Promise<{ success: boolean; error?: string }>;
@@ -562,7 +562,7 @@ export function BusinessProvider({ children }: { children: React.ReactNode }) {
 
   const updateBusinessProfile = async (
     businessId: string, 
-    updates: { name: string; address?: string; phone?: string; logoUrl?: string; receiptSettings?: ReceiptSettings; midtransSettings?: MidtransSettings }
+    updates: { name: string; address?: string; phone?: string; logoUrl?: string; receiptSettings?: ReceiptSettings; midtransSettings?: MidtransSettings; enabledModules?: string[] }
   ): Promise<{ success: boolean; business?: Business; error?: string }> => {
     try {
       const token = await getIdToken();

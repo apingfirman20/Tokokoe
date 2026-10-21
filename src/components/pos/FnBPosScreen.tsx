@@ -39,12 +39,32 @@ export function FnBPosScreen() {
   const [selectedCategory, setSelectedCategory] = useState<string>('Semua');
   const [searchQuery, setSearchQuery] = useState('');
 
+  // Check active enabled modules
+  const isTablesEnabled = React.useMemo(() => {
+    if (!activeBusiness?.enabledModules) return true;
+    return activeBusiness.enabledModules.includes('fnb.tables');
+  }, [activeBusiness?.enabledModules]);
+
+  const isKitchenEnabled = React.useMemo(() => {
+    if (!activeBusiness?.enabledModules) return true;
+    return activeBusiness.enabledModules.includes('fnb.kitchen');
+  }, [activeBusiness?.enabledModules]);
+
   // Cart & Order State
   const [cart, setCart] = useState<CartLineItem[]>([]);
-  const [orderType, setOrderType] = useState<OrderType>('dine_in');
+  const [orderType, setOrderType] = useState<OrderType>(() => 
+    (!activeBusiness?.enabledModules || activeBusiness.enabledModules.includes('fnb.tables')) ? 'dine_in' : 'takeaway'
+  );
   const [selectedTableId, setSelectedTableId] = useState<string>('');
   const [selectedTable, setSelectedTable] = useState<string>('Meja 01');
   const [customerName, setCustomerName] = useState('');
+
+  // Auto-switch to takeaway if tables feature is disabled
+  React.useEffect(() => {
+    if (!isTablesEnabled && orderType === 'dine_in') {
+      setOrderType('takeaway');
+    }
+  }, [isTablesEnabled, orderType]);
 
   // Modals & Sub-states
   const [showTableModal, setShowTableModal] = useState(false);
@@ -76,20 +96,21 @@ export function FnBPosScreen() {
   const [orderPaymentError, setOrderPaymentError] = useState<string>('');
 
   const incomingSelfOrders = React.useMemo(() => {
+    if (!isTablesEnabled) return [];
     return (sales || []).filter(
       s => s.businessId === activeBusiness?.id && s.orderStatus === 'waiting_cashier'
     );
-  }, [sales, activeBusiness?.id]);
+  }, [sales, activeBusiness?.id, isTablesEnabled]);
 
   // Find active unpaid order for the currently selected table
   const selectedTableUnpaidSale = React.useMemo(() => {
-    if (!selectedTable) return null;
+    if (!isTablesEnabled || !selectedTable) return null;
     return (sales || []).find(
       s => s.businessId === activeBusiness?.id && 
            s.tableNumber === selectedTable && 
            s.paymentStatus === 'pending'
     );
-  }, [sales, activeBusiness?.id, selectedTable]);
+  }, [sales, activeBusiness?.id, selectedTable, isTablesEnabled]);
 
   // Audio notification when new customer QR order arrives
   const prevIncomingCountRef = React.useRef(incomingSelfOrders.length);
@@ -235,11 +256,11 @@ export function FnBPosScreen() {
 
   // Synchronize table selection with first table
   React.useEffect(() => {
-    if (tables.length > 0 && !selectedTableId) {
+    if (isTablesEnabled && tables.length > 0 && !selectedTableId) {
       setSelectedTableId(tables[0].id);
       setSelectedTable(tables[0].tableNumber);
     }
-  }, [tables, selectedTableId]);
+  }, [isTablesEnabled, tables, selectedTableId]);
 
   // Filter products by category & search (excluding archived/inactive)
   const defaultFnBCategories = ['Makanan', 'Minuman', 'Dessert', 'Coffee Base', 'Non-Coffee', 'Signature', 'Pastry & Bakery', 'Makanan Berat'];
@@ -444,9 +465,9 @@ export function FnBPosScreen() {
         paidAmount,
         changeAmount,
         paymentMethod: 'cash',
-        orderType,
-        tableNumber: orderType === 'dine_in' ? selectedTable : undefined,
-        tableId: orderType === 'dine_in' ? selectedTableId : undefined,
+        orderType: isTablesEnabled ? orderType : 'takeaway',
+        tableNumber: isTablesEnabled && orderType === 'dine_in' ? selectedTable : undefined,
+        tableId: isTablesEnabled && orderType === 'dine_in' ? selectedTableId : undefined,
         customerName: customerName || undefined,
       });
 
@@ -484,9 +505,9 @@ export function FnBPosScreen() {
         paidAmount: grandTotal,
         changeAmount: 0,
         paymentMethod: 'qris',
-        orderType,
-        tableNumber: orderType === 'dine_in' ? selectedTable : undefined,
-        tableId: orderType === 'dine_in' ? selectedTableId : undefined,
+        orderType: isTablesEnabled ? orderType : 'takeaway',
+        tableNumber: isTablesEnabled && orderType === 'dine_in' ? selectedTable : undefined,
+        tableId: isTablesEnabled && orderType === 'dine_in' ? selectedTableId : undefined,
         customerName: customerName || undefined,
       });
 
@@ -776,22 +797,32 @@ export function FnBPosScreen() {
 
           {/* Quick Metrics */}
           <div className="hidden xl:flex items-center gap-4 bg-slate-50/90 px-4 py-2 rounded-xl border border-slate-200/80 text-xs text-slate-600">
-            <div className="flex items-center gap-1.5">
-              <span>Meja Terisi</span>
-              <strong suppressHydrationWarning className="text-slate-900">{tables.filter(t => t.status === 'occupied').length} / {tables.length}</strong>
-              <span className="text-slate-400 text-xs ml-0.5">&gt;</span>
-            </div>
-            <div className="w-px h-3.5 bg-slate-300" />
-            <div className="flex items-center gap-1.5 text-emerald-700 font-bold">
-              <span>Dapur KDS</span>
-              <span className="text-emerald-600 font-semibold">Terhubung</span>
-            </div>
+            {isTablesEnabled && (
+              <div className="flex items-center gap-1.5">
+                <span>Meja Terisi</span>
+                <strong suppressHydrationWarning className="text-slate-900">{tables.filter(t => t.status === 'occupied').length} / {tables.length}</strong>
+                <span className="text-slate-400 text-xs ml-0.5">&gt;</span>
+              </div>
+            )}
+            {isTablesEnabled && isKitchenEnabled && <div className="w-px h-3.5 bg-slate-300" />}
+            {isKitchenEnabled && (
+              <div className="flex items-center gap-1.5 text-emerald-700 font-bold">
+                <span>Dapur KDS</span>
+                <span className="text-emerald-600 font-semibold">Terhubung</span>
+              </div>
+            )}
+            {!isTablesEnabled && !isKitchenEnabled && (
+              <div className="flex items-center gap-1.5 text-teal-700 font-bold">
+                <span>Mode POS</span>
+                <span className="text-teal-600 font-semibold">Kasir Cepat Langsung</span>
+              </div>
+            )}
           </div>
         </div>
 
         {/* Action Buttons */}
         <div className="flex items-center gap-2.5">
-          {incomingSelfOrders.length > 0 && (
+          {isTablesEnabled && incomingSelfOrders.length > 0 && (
             <button
               type="button"
               onClick={() => setShowIncomingOrdersModal(true)}
@@ -803,32 +834,40 @@ export function FnBPosScreen() {
           )}
 
           {/* Order Type Toggle */}
-          <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200/80 text-xs font-semibold">
-            <button
-              onClick={() => setOrderType('dine_in')}
-              className={`px-3.5 py-1.5 rounded-lg transition-all ${
-                orderType === 'dine_in' ? 'bg-[#00897b] text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              Dine-in
-            </button>
-            <button
-              onClick={() => setOrderType('takeaway')}
-              className={`px-3.5 py-1.5 rounded-lg transition-all ${
-                orderType === 'takeaway' ? 'bg-[#00897b] text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              Takeaway
-            </button>
-          </div>
+          {isTablesEnabled ? (
+            <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200/80 text-xs font-semibold">
+              <button
+                onClick={() => setOrderType('dine_in')}
+                className={`px-3.5 py-1.5 rounded-lg transition-all ${
+                  orderType === 'dine_in' ? 'bg-[#00897b] text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Dine-in
+              </button>
+              <button
+                onClick={() => setOrderType('takeaway')}
+                className={`px-3.5 py-1.5 rounded-lg transition-all ${
+                  orderType === 'takeaway' ? 'bg-[#00897b] text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Takeaway
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-teal-50 text-teal-800 border border-teal-200 text-xs font-bold">
+              <span>Mode: Kasir Langsung</span>
+            </div>
+          )}
 
-          <Link
-            href={`/app/${activeBusiness?.id}/fnb/kitchen`}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-slate-50 hover:bg-slate-100 text-slate-700 text-xs font-semibold transition-colors border border-slate-200/70"
-          >
-            <ChefHat className="w-3.5 h-3.5 text-teal-600" />
-            <span>KDS Dapur</span>
-          </Link>
+          {isKitchenEnabled && (
+            <Link
+              href={`/app/${activeBusiness?.id}/fnb/kitchen`}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-slate-50 hover:bg-slate-100 text-slate-700 text-xs font-semibold transition-colors border border-slate-200/70"
+            >
+              <ChefHat className="w-3.5 h-3.5 text-teal-600" />
+              <span>KDS Dapur</span>
+            </Link>
+          )}
 
           <button
             onClick={() => setShowShiftModal(true)}
@@ -851,7 +890,7 @@ export function FnBPosScreen() {
       </section>
 
       {/* Incoming QR Table Orders Alert Banner */}
-      {incomingSelfOrders.length > 0 && (
+      {isTablesEnabled && incomingSelfOrders.length > 0 && (
         <div className="bg-gradient-to-r from-amber-500/15 via-amber-500/10 to-orange-500/15 border-2 border-amber-400 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3 shadow-xs animate-in slide-in-from-top-2">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-amber-500 text-white flex items-center justify-center shadow-xs shrink-0 animate-bounce">
@@ -897,7 +936,7 @@ export function FnBPosScreen() {
               />
             </div>
 
-            {orderType === 'dine_in' && (
+            {isTablesEnabled && orderType === 'dine_in' && (
               <button
                 onClick={() => setShowTableModal(true)}
                 className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-teal-50/80 text-teal-800 border border-teal-200 hover:bg-teal-100 transition-colors text-xs font-semibold"
@@ -1018,9 +1057,9 @@ export function FnBPosScreen() {
             <div className="flex items-center gap-2">
               <h3 className="font-bold text-sm text-slate-900">Pesanan Aktif</h3>
               <span className="text-[11px] font-semibold text-teal-800 bg-teal-50 border border-teal-200 px-2 py-0.5 rounded-md capitalize">
-                {orderType === 'dine_in' ? 'Dine In' : 'Takeaway'}
+                {isTablesEnabled ? (orderType === 'dine_in' ? 'Dine In' : 'Takeaway') : 'Kasir Langsung'}
               </span>
-              {orderType === 'dine_in' && (
+              {isTablesEnabled && orderType === 'dine_in' && (
                 <span className="text-[11px] font-semibold text-slate-700 bg-slate-100 px-2 py-0.5 rounded-md">
                   {selectedTable}
                 </span>
@@ -1228,7 +1267,7 @@ export function FnBPosScreen() {
                 <ChevronRight className="w-4 h-4 ml-1" />
               </button>
 
-              {orderType === 'dine_in' && (
+              {isKitchenEnabled && isTablesEnabled && orderType === 'dine_in' && (
                 <button
                   type="button"
                   onClick={handleOpenOrder}
@@ -1245,7 +1284,7 @@ export function FnBPosScreen() {
       </div>
 
       {/* 3. TABLE SELECTION MODAL */}
-      {showTableModal && (
+      {isTablesEnabled && showTableModal && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200">
             <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-100">
@@ -1457,7 +1496,7 @@ export function FnBPosScreen() {
       )}
 
       {/* 3.2 MOVE TABLE MODAL */}
-      {showMoveModal && (
+      {isTablesEnabled && showMoveModal && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl border border-slate-200">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
@@ -1536,7 +1575,7 @@ export function FnBPosScreen() {
       )}
 
       {/* 3.3 MERGE TABLE MODAL */}
-      {showMergeModal && (
+      {isTablesEnabled && showMergeModal && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl border border-slate-200">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
@@ -2200,7 +2239,7 @@ export function FnBPosScreen() {
       )}
 
       {/* 6. INCOMING QR TABLE SELF-ORDERS MODAL */}
-      {showIncomingOrdersModal && (
+      {isTablesEnabled && showIncomingOrdersModal && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-3xl max-w-2xl w-full max-h-[90vh] flex flex-col p-6 shadow-2xl border border-slate-200 overflow-hidden animate-in zoom-in-95">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100">

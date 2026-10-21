@@ -16,8 +16,9 @@ import {
   Receipt, Image as ImageIcon, SlidersHorizontal, Printer,
   Store, Sparkles, X, Upload, Link2, RotateCcw,
   Coffee, Smartphone, ShoppingCart, Eye, EyeOff, Copy,
-  ExternalLink, ShieldCheck, Key
+  ExternalLink, ShieldCheck, Key, UtensilsCrossed, ChefHat
 } from 'lucide-react';
+import { DEFAULT_MODULES_BY_TYPE } from '@/lib/modules/registry';
 
 export default function SettingsPage() {
   const { 
@@ -161,6 +162,79 @@ export default function SettingsPage() {
       setMidtransError(err.message || 'Terjadi kesalahan sistem.');
     } finally {
       setIsSavingMidtrans(false);
+    }
+  };
+
+  // F&B Operational Modules State (Tables and Kitchen Display)
+  const [tablesFeatureEnabled, setTablesFeatureEnabled] = useState(true);
+  const [kitchenFeatureEnabled, setKitchenFeatureEnabled] = useState(true);
+  const [isSavingFeatures, setIsSavingFeatures] = useState(false);
+  const [featuresFeedback, setFeaturesFeedback] = useState<string | null>(null);
+  const [featuresError, setFeaturesError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (activeBusiness) {
+      const currentModules = activeBusiness.enabledModules || DEFAULT_MODULES_BY_TYPE[activeBusiness.businessType || 'fnb'] || [];
+      setTablesFeatureEnabled(currentModules.includes('fnb.tables'));
+      setKitchenFeatureEnabled(currentModules.includes('fnb.kitchen'));
+    }
+  }, [activeBusiness?.id, activeBusiness?.enabledModules, activeBusiness?.businessType]);
+
+  const handleSaveFeatures = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!activeBusiness) return;
+    setIsSavingFeatures(true);
+    setFeaturesFeedback(null);
+    setFeaturesError(null);
+
+    try {
+      const currentModules = activeBusiness.enabledModules || DEFAULT_MODULES_BY_TYPE[activeBusiness.businessType || 'fnb'] || [];
+      let nextModules = [...currentModules];
+
+      // Ensure core modules remain active
+      const coreModules = [
+        'core.pos', 
+        'core.dashboard', 
+        'core.products', 
+        'core.inventory', 
+        'core.employees', 
+        'core.reports', 
+        'core.finance', 
+        'core.settings'
+      ];
+      for (const m of coreModules) {
+        if (!nextModules.includes(m)) nextModules.push(m);
+      }
+
+      if (tablesFeatureEnabled) {
+        if (!nextModules.includes('fnb.tables')) nextModules.push('fnb.tables');
+      } else {
+        nextModules = nextModules.filter(m => m !== 'fnb.tables');
+      }
+
+      if (kitchenFeatureEnabled) {
+        if (!nextModules.includes('fnb.kitchen')) nextModules.push('fnb.kitchen');
+      } else {
+        nextModules = nextModules.filter(m => m !== 'fnb.kitchen');
+      }
+
+      const res = await updateBusinessProfile(activeBusiness.id, {
+        name: businessName.trim() || activeBusiness.name,
+        address: address.trim(),
+        phone: phone.trim(),
+        enabledModules: nextModules,
+      });
+
+      if (res.success) {
+        setFeaturesFeedback('✓ Pengaturan modul operasional (Meja & Layar Dapur) berhasil diperbarui!');
+        setTimeout(() => setFeaturesFeedback(null), 4000);
+      } else {
+        setFeaturesError(res.error || 'Gagal menyimpan pengaturan modul operasional.');
+      }
+    } catch (err: any) {
+      setFeaturesError(err.message || 'Terjadi kesalahan sistem.');
+    } finally {
+      setIsSavingFeatures(false);
     }
   };
 
@@ -426,7 +500,144 @@ export default function SettingsPage() {
         </div>
       </form>
 
-      {/* 2. Pengaturan Nota & Desain Struk Kasir */}
+      {/* 2. Fitur & Modul Operasional (Khusus F&B Restoran / Kafe) */}
+      {businessType === 'fnb' && (
+        <form onSubmit={handleSaveFeatures} className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-xs space-y-5">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3">
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="font-bold text-sm text-slate-900 flex items-center gap-2">
+                  <SlidersHorizontal className="w-4 h-4 text-teal-600" />
+                  <span>Fitur &amp; Modul Operasional Resto / Kafe (F&amp;B)</span>
+                </h2>
+                <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full border bg-teal-50 text-teal-800 border-teal-200">
+                  On / Off Fitur
+                </span>
+              </div>
+              <p className="text-xs text-slate-500 mt-1">
+                Sesuaikan alur kasir dan modul aktif dengan konsep pelayanan toko Anda (misal: hanya takeaway/kasir cepat tanpa meja atau tanpa layar dapur).
+              </p>
+            </div>
+
+            <button
+              type="submit"
+              disabled={isSavingFeatures}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-semibold text-xs shadow-xs disabled:opacity-50 transition-colors"
+            >
+              {isSavingFeatures ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+              <span>{isSavingFeatures ? 'Menyimpan...' : 'Simpan Pengaturan Fitur'}</span>
+            </button>
+          </div>
+
+          {featuresFeedback && (
+            <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+              <span>{featuresFeedback}</span>
+            </div>
+          )}
+
+          {featuresError && (
+            <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-semibold flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 text-rose-600" />
+              <span>{featuresError}</span>
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Toggle 1: Fitur Meja / Dine-in */}
+            <div className={`p-4 rounded-2xl border-2 transition-all ${
+              tablesFeatureEnabled ? 'border-teal-500/80 bg-teal-50/20' : 'border-slate-200 bg-slate-50/50'
+            }`}>
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-center gap-2.5">
+                  <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${
+                    tablesFeatureEnabled ? 'bg-teal-600 text-white shadow-xs' : 'bg-slate-200 text-slate-500'
+                  }`}>
+                    <UtensilsCrossed className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-xs text-slate-900">Manajemen Meja &amp; Dine-in</h3>
+                    <span className="text-[10px] font-mono text-slate-400">Modul: fnb.tables</span>
+                  </div>
+                </div>
+
+                <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                  <input
+                    type="checkbox"
+                    checked={tablesFeatureEnabled}
+                    onChange={(e) => setTablesFeatureEnabled(e.target.checked)}
+                    className="sr-only peer"
+                  />
+                  <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-teal-600"></div>
+                </label>
+              </div>
+
+              <p className="text-[11px] text-slate-600 mt-3 leading-relaxed">
+                Kelola nomor meja, kapasitas duduk, dan pesanan dine-in dari meja / QR Meja.
+              </p>
+
+              <div className={`mt-3 p-2.5 rounded-xl text-[11px] font-medium ${
+                tablesFeatureEnabled 
+                  ? 'bg-teal-100/60 text-teal-900 border border-teal-200/60' 
+                  : 'bg-rose-50 text-rose-800 border border-rose-200/60'
+              }`}>
+                {tablesFeatureEnabled ? (
+                  <span>✓ <strong>Aktif:</strong> Menu &quot;Manajemen Meja&quot; muncul di sidebar, dan kasir POS menampilkan tombol pemilihan meja &amp; Dine-in.</span>
+                ) : (
+                  <span>✕ <strong>Nonaktif:</strong> Menu &quot;Manajemen Meja&quot; disembunyikan dari sidebar, dan kasir POS langsung beralih ke Kasir Cepat / Takeaway tanpa opsi pilih meja.</span>
+                )}
+              </div>
+            </div>
+
+            {/* Toggle 2: Fitur Layar Dapur / KDS */}
+            <div className={`p-4 rounded-2xl border-2 transition-all ${
+              kitchenFeatureEnabled ? 'border-teal-500/80 bg-teal-50/20' : 'border-slate-200 bg-slate-50/50'
+            }`}>
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-center gap-2.5">
+                  <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${
+                    kitchenFeatureEnabled ? 'bg-teal-600 text-white shadow-xs' : 'bg-slate-200 text-slate-500'
+                  }`}>
+                    <ChefHat className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-xs text-slate-900">Layar Dapur (Kitchen Display / KDS)</h3>
+                    <span className="text-[10px] font-mono text-slate-400">Modul: fnb.kitchen</span>
+                  </div>
+                </div>
+
+                <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                  <input
+                    type="checkbox"
+                    checked={kitchenFeatureEnabled}
+                    onChange={(e) => setKitchenFeatureEnabled(e.target.checked)}
+                    className="sr-only peer"
+                  />
+                  <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-teal-600"></div>
+                </label>
+              </div>
+
+              <p className="text-[11px] text-slate-600 mt-3 leading-relaxed">
+                Antrean pesanan masak otomatis untuk layar koki &amp; barista dapur.
+              </p>
+
+              <div className={`mt-3 p-2.5 rounded-xl text-[11px] font-medium ${
+                kitchenFeatureEnabled 
+                  ? 'bg-teal-100/60 text-teal-900 border border-teal-200/60' 
+                  : 'bg-rose-50 text-rose-800 border border-rose-200/60'
+              }`}>
+                {kitchenFeatureEnabled ? (
+                  <span>✓ <strong>Aktif:</strong> Menu &quot;Layar Dapur (KDS)&quot; muncul di sidebar, dan kasir POS menampilkan tombol &quot;Kirim Pesanan ke KDS Dapur&quot;.</span>
+                ) : (
+                  <span>✕ <strong>Nonaktif:</strong> Menu &quot;Layar Dapur&quot; disembunyikan dari sidebar, dan kasir POS langsung menyelesaikan transaksi tanpa perlu kirim ke dapur.</span>
+                )}
+              </div>
+            </div>
+          </div>
+        </form>
+      )}
+
+      {/* 3. Pengaturan Nota & Desain Struk Kasir */}
       <form onSubmit={handleSaveReceiptSettings} className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-xs space-y-5">
         {/* Header Section 2 */}
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3">

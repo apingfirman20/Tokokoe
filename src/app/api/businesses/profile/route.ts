@@ -40,6 +40,7 @@ const updateProfileSchema = z.object({
   logoUrl: z.string().trim().optional(),
   receiptSettings: receiptSettingsSchema,
   midtransSettings: midtransSettingsSchema,
+  enabledModules: z.array(z.string()).optional(),
 });
 
 export async function PUT(request: Request) {
@@ -82,6 +83,9 @@ export async function PUT(request: Request) {
     }
     if (midtransSettings !== undefined) {
       updates.midtransSettings = midtransSettings;
+    }
+    if (parsed.data.enabledModules !== undefined) {
+      updates.enabledModules = parsed.data.enabledModules;
     }
 
     await bizRef.update(updates);

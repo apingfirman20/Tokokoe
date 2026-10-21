@@ -1,6 +1,7 @@
 'use client';
 
 import React, { use } from 'react';
+import Link from 'next/link';
 import { useBusiness } from '@/context/BusinessContext';
 import { KitchenOrderStatus } from '@/types';
 import { ChefHat, Clock, CheckCircle2, ArrowRight, BellRing } from 'lucide-react';
@@ -8,6 +9,36 @@ import { ChefHat, Clock, CheckCircle2, ArrowRight, BellRing } from 'lucide-react
 export default function KitchenPage() {
   const { sales, updateOrderStatus, activeBusiness } = useBusiness();
   const businessId = activeBusiness?.id || 'biz_kopi_senja';
+
+  // Feature Disabled Guard: when fnb.kitchen is turned off in Settings
+  if (activeBusiness && activeBusiness.enabledModules && !activeBusiness.enabledModules.includes('fnb.kitchen')) {
+    return (
+      <div className="bg-white p-8 rounded-3xl border border-slate-200 text-center max-w-lg mx-auto my-12 space-y-4 shadow-sm">
+        <div className="w-16 h-16 rounded-2xl bg-slate-100 text-slate-500 border border-slate-200 flex items-center justify-center mx-auto">
+          <ChefHat className="w-8 h-8" />
+        </div>
+        <div className="space-y-1">
+          <span className="text-[11px] font-bold text-slate-700 bg-slate-100 px-2.5 py-0.5 rounded-full border border-slate-200 uppercase">
+            Fitur Dinonaktifkan
+          </span>
+          <h2 className="text-lg font-extrabold text-slate-900 pt-1">
+            Layar Dapur (KDS) Sedang Nonaktif
+          </h2>
+        </div>
+        <p className="text-xs text-slate-600 leading-relaxed">
+          Fitur Kitchen Display System (KDS) saat ini dimatikan pada pengaturan unit bisnis ini. Kasir POS langsung menyelesaikan pembayaran tanpa alur antrean masak.
+        </p>
+        <div className="pt-2">
+          <Link
+            href={`/app/${activeBusiness.id}/settings`}
+            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs shadow-md transition-all"
+          >
+            <span>Buka Pengaturan Fitur Bisnis</span>
+          </Link>
+        </div>
+      </div>
+    );
+  }
 
   // Orders must be approved/forwarded by Cashier first (waiting_cashier is hidden from Kitchen)
   const kitchenSales = sales.filter(
