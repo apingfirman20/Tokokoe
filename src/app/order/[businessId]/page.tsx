@@ -8,7 +8,8 @@ import {
   CheckCircle2, Clock, ChefHat, Sparkles, AlertCircle, 
   X, ChevronRight, MessageSquare, ArrowLeft, RefreshCw,
   Store, MapPin, Phone, HelpCircle, Banknote, QrCode as QrCodeIcon,
-  BellRing, Smartphone, ShieldCheck, Printer, Download
+  BellRing, Smartphone, ShieldCheck, Printer, Download,
+  AlertTriangle, Loader2
 } from 'lucide-react';
 import { generateDynamicQrisWithLogo } from '@/lib/qr-generator';
 
@@ -203,23 +204,93 @@ function CustomerOrderContent({ params }: { params: Promise<{ businessId: string
   const serviceCharge = business && business.serviceChargeRate ? Math.round((subtotal * business.serviceChargeRate) / 100) : 0;
   const grandTotal = subtotal + tax + serviceCharge;
 
-  // Generate dynamic QRIS code for payment with restaurant logo
+  const [midtransNotConnected, setMidtransNotConnected] = useState(false);
+  const [midtransError, setMidtransError] = useState('');
+  const [midtransOrderId, setMidtransOrderId] = useState('');
+  const [midtransIsPaid, setMidtransIsPaid] = useState(false);
+
+  // Generate dynamic QRIS code for payment directly via Midtrans Core API
   const handleOpenQrisModal = async () => {
     setIsGeneratingQris(true);
     setShowQrisModal(true);
+    setMidtransNotConnected(false);
+    setMidtransError('');
+    setMidtransOrderId('');
+    setMidtransIsPaid(false);
+    setQrisDataUrl('');
+
     try {
-      const { dataUrl } = await generateDynamicQrisWithLogo(
-        grandTotal,
-        business?.name || 'Tokokoe Resto',
-        business?.logoUrl
-      );
-      setQrisDataUrl(dataUrl);
-    } catch (e) {
-      console.error('Error generating dynamic QRIS payload:', e);
+      const res = await fetch('/api/payments/midtrans/charge-qris', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          businessId: business?.id || businessId,
+          grossAmount: grandTotal,
+          customerName: customerName.trim() || 'Tamu Meja',
+        }),
+      });
+      const data = await res.json();
+
+      if (data.notConfigured) {
+        setMidtransNotConnected(true);
+        setMidtransError(data.error);
+        return;
+      }
+
+      if (!data.success) {
+        setMidtransError(data.error || 'Gagal membuat QRIS di Midtrans.');
+        return;
+      }
+
+      setMidtransOrderId(data.orderId);
+
+      // Render official Midtrans EMVCo QR code with store center logo badge
+      if (data.qrString) {
+        const { dataUrl } = await generateDynamicQrisWithLogo(
+          grandTotal,
+          business?.name || 'Tokokoe Resto',
+          business?.logoUrl,
+          {},
+          data.qrString
+        );
+        setQrisDataUrl(dataUrl);
+      } else if (data.qrUrl) {
+        setQrisDataUrl(data.qrUrl);
+      }
+    } catch (e: any) {
+      console.error('Error generating Midtrans QRIS:', e);
+      setMidtransError(e.message || 'Gagal menghubungi layanan Midtrans.');
     } finally {
       setIsGeneratingQris(false);
     }
   };
+
+  // Real-time polling for customer table QRIS payment detection
+  useEffect(() => {
+    if (!showQrisModal || !midtransOrderId || !business?.id) return;
+
+    let isMounted = true;
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/payments/midtrans/status?businessId=${business.id}&orderId=${encodeURIComponent(midtransOrderId)}`);
+        const data = await res.json();
+        if (isMounted && data.success && data.isPaid) {
+          clearInterval(interval);
+          setMidtransIsPaid(true);
+          setShowQrisModal(false);
+          // Payment received into QR! Automatically submit and display digital receipt!
+          executeOrderSubmission('qris');
+        }
+      } catch (err) {
+        // silent polling catch
+      }
+    }, 3000);
+
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, [showQrisModal, midtransOrderId, business?.id]);
 
   // Submit trigger from drawer form
   const handleInitiateOrder = (e: React.FormEvent) => {
@@ -1185,81 +1256,150 @@ function CustomerOrderContent({ params }: { params: Promise<{ businessId: string
               <p className="text-xs text-slate-500">{selectedTable} • Self-Order Meja</p>
             </div>
 
-            {/* QRIS Code Box */}
-            <div className="p-3 bg-slate-50 rounded-2xl border-2 border-slate-900 mx-auto max-w-[260px] space-y-2">
-              <div className="text-[10px] font-black tracking-widest text-slate-800 bg-white py-0.5 px-2 rounded border border-slate-200 uppercase">
-                QRIS STANDAR NASIONAL
-              </div>
-              <div className="p-2 bg-white rounded-xl shadow-xs">
-                {qrisDataUrl ? (
-                  <img src={qrisDataUrl} alt="QRIS Code" className="w-44 h-44 mx-auto object-contain" />
-                ) : (
-                  <div className="w-44 h-44 flex items-center justify-center text-xs text-slate-400">
-                    Menyiapkan QRIS...
+            {/* Midtrans Not Connected Alert */}
+            {midtransNotConnected ? (
+              <div className="p-4 rounded-2xl bg-amber-50 border-2 border-amber-300 text-left space-y-3">
+                <div className="flex items-start gap-2.5">
+                  <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                  <div>
+                    <h4 className="font-extrabold text-xs text-amber-950 uppercase tracking-wider">Midtrans Belum Terhubung</h4>
+                    <p className="text-xs text-amber-800 mt-1 leading-relaxed">
+                      Restoran ini belum menghubungkan akun Midtrans atau Server Key belum diaktifkan. Pembayaran QRIS online belum dapat diproses otomatis.
+                    </p>
                   </div>
-                )}
-              </div>
-              <div className="text-[10px] text-slate-500 font-semibold">
-                NMID: ID1020038892110
-              </div>
-            </div>
+                </div>
 
-            {/* Total Amount to Pay - Generate Harga Otomatis */}
-            <div className="p-3 rounded-2xl bg-teal-50 border border-teal-200 text-center">
-              <div className="flex items-center justify-center gap-1.5 text-[11px] font-bold text-teal-800">
-                <Sparkles className="w-3.5 h-3.5 text-teal-600" />
-                <span>Nominal Terisi Otomatis di QR (Tag 54):</span>
-              </div>
-              <div className="text-2xl font-black text-teal-950 mt-0.5 tabular-nums">
-                Rp {grandTotal.toLocaleString('id-ID')}
-              </div>
-              <p className="text-[10px] text-teal-700 mt-0.5">
-                Tinggal scan, nominal harga langsung muncul di aplikasi perbankan / e-wallet Anda
-              </p>
-            </div>
+                <div className="p-2.5 bg-white/80 rounded-xl border border-amber-200 text-[11px] text-amber-900 font-medium">
+                  💡 <span className="font-bold">Solusi:</span> Silakan pilih opsi <span className="font-bold underline">Bayar di Kasir (Tunai)</span> untuk tetap memesan menu dan membayar langsung ke kasir.
+                </div>
 
-            {/* Supported Payment Providers */}
-            <div className="text-[10px] text-slate-500 space-y-1">
-              <div>Scan dengan m-Banking &amp; E-Wallet:</div>
-              <div className="font-bold text-slate-700 flex flex-wrap justify-center gap-1 text-[10px]">
-                <span className="bg-slate-100 px-1.5 py-0.5 rounded">BCA</span>
-                <span className="bg-slate-100 px-1.5 py-0.5 rounded">Mandiri</span>
-                <span className="bg-slate-100 px-1.5 py-0.5 rounded">GoPay</span>
-                <span className="bg-slate-100 px-1.5 py-0.5 rounded">OVO</span>
-                <span className="bg-slate-100 px-1.5 py-0.5 rounded">DANA</span>
-                <span className="bg-slate-100 px-1.5 py-0.5 rounded">ShopeePay</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowQrisModal(false);
+                    setPaymentChoice('cash');
+                    executeOrderSubmission('cash');
+                  }}
+                  className="w-full py-2.5 px-3 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs shadow-md transition-all active:scale-98 flex items-center justify-center gap-1.5"
+                >
+                  <Banknote className="w-4 h-4" />
+                  <span>Kirim Pesanan &amp; Bayar di Kasir (Tunai)</span>
+                </button>
               </div>
-            </div>
+            ) : midtransError ? (
+              <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200 text-left space-y-2.5">
+                <div className="flex items-center gap-2 text-rose-800 font-bold text-xs">
+                  <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                  <span>Kendala Penerbitan QRIS Midtrans</span>
+                </div>
+                <p className="text-xs text-rose-700 leading-relaxed">{midtransError}</p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowQrisModal(false);
+                    setPaymentChoice('cash');
+                    executeOrderSubmission('cash');
+                  }}
+                  className="w-full py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-xs"
+                >
+                  Pindah ke Bayar di Kasir Saja
+                </button>
+              </div>
+            ) : isGeneratingQris ? (
+              <div className="py-12 flex flex-col items-center justify-center text-xs text-slate-500 gap-3">
+                <div className="w-8 h-8 border-3 border-teal-600 border-t-transparent rounded-full animate-spin" />
+                <span className="font-semibold text-slate-700">Menerbitkan QRIS Resmi Midtrans...</span>
+                <span className="text-[10px] text-slate-400">Menghubungkan ke Bank Indonesia &amp; Midtrans Core API</span>
+              </div>
+            ) : (
+              <>
+                {/* QRIS Code Box */}
+                <div className="p-3 bg-slate-50 rounded-2xl border-2 border-slate-900 mx-auto max-w-[260px] space-y-2">
+                  <div className="text-[10px] font-black tracking-widest text-slate-800 bg-white py-0.5 px-2 rounded border border-slate-200 uppercase flex items-center justify-center gap-1">
+                    <QrCodeIcon className="w-3.5 h-3.5 text-teal-700" />
+                    <span>MIDTRANS QRIS RESMI</span>
+                  </div>
+                  <div className="p-2 bg-white rounded-xl shadow-xs">
+                    {qrisDataUrl ? (
+                      <img src={qrisDataUrl} alt="QRIS Code" className="w-44 h-44 mx-auto object-contain" />
+                    ) : (
+                      <div className="w-44 h-44 flex flex-col items-center justify-center text-xs text-slate-400 gap-2">
+                        <div className="w-6 h-6 border-2 border-teal-600 border-t-transparent rounded-full animate-spin" />
+                        <span>Menyiapkan QRIS...</span>
+                      </div>
+                    )}
+                  </div>
+                  <div className="text-[10px] text-slate-500 font-semibold truncate px-1">
+                    Order ID: {midtransOrderId || 'MIDTRANS-QRIS'}
+                  </div>
+                </div>
 
-            {/* Actions */}
-            <div className="space-y-2 pt-1">
-              <button
-                type="button"
-                disabled={isSubmitting}
-                onClick={() => executeOrderSubmission('qris')}
-                className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-md transition-all active:scale-98 flex items-center justify-center gap-2"
-              >
-                {isSubmitting ? (
-                  <span>Memproses Pesanan...</span>
-                ) : (
-                  <>
-                    <CheckCircle2 className="w-4 h-4" />
-                    <span>Saya Sudah Bayar via QRIS 🚀</span>
-                  </>
-                )}
-              </button>
+                {/* Total Amount to Pay - Generate Harga Otomatis */}
+                <div className="p-3 rounded-2xl bg-teal-50 border border-teal-200 text-center">
+                  <div className="flex items-center justify-center gap-1.5 text-[11px] font-bold text-teal-800">
+                    <Sparkles className="w-3.5 h-3.5 text-teal-600" />
+                    <span>Nominal Terisi Otomatis di QR:</span>
+                  </div>
+                  <div className="text-2xl font-black text-teal-950 mt-0.5 tabular-nums">
+                    Rp {grandTotal.toLocaleString('id-ID')}
+                  </div>
+                  <p className="text-[10px] text-teal-700 mt-0.5">
+                    Tinggal scan, nominal harga langsung muncul di aplikasi perbankan / e-wallet Anda
+                  </p>
+                </div>
 
-              <button
-                type="button"
-                onClick={() => {
-                  setShowQrisModal(false);
-                  setPaymentChoice('cash');
-                }}
-                className="w-full py-1.5 text-xs font-semibold text-slate-500 hover:text-slate-800"
-              >
-                Ubah ke Bayar di Kasir (Tunai)
-              </button>
-            </div>
+                {/* Real-time Checking Status Indicator */}
+                <div className="flex items-center justify-center gap-2 py-1 px-3 bg-emerald-50 rounded-full border border-emerald-200 text-emerald-800 text-[11px] font-bold">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
+                  <span>Menunggu Pembayaran (Uang Masuk Terdeteksi Otomatis)</span>
+                </div>
+
+                {/* Supported Payment Providers */}
+                <div className="text-[10px] text-slate-500 space-y-1">
+                  <div>Scan dengan m-Banking &amp; E-Wallet:</div>
+                  <div className="font-bold text-slate-700 flex flex-wrap justify-center gap-1 text-[10px]">
+                    <span className="bg-slate-100 px-1.5 py-0.5 rounded">BCA</span>
+                    <span className="bg-slate-100 px-1.5 py-0.5 rounded">Mandiri</span>
+                    <span className="bg-slate-100 px-1.5 py-0.5 rounded">BRI</span>
+                    <span className="bg-slate-100 px-1.5 py-0.5 rounded">BNI</span>
+                    <span className="bg-slate-100 px-1.5 py-0.5 rounded">GoPay</span>
+                    <span className="bg-slate-100 px-1.5 py-0.5 rounded">OVO</span>
+                    <span className="bg-slate-100 px-1.5 py-0.5 rounded">DANA</span>
+                    <span className="bg-slate-100 px-1.5 py-0.5 rounded">ShopeePay</span>
+                  </div>
+                </div>
+
+                {/* Actions */}
+                <div className="space-y-2 pt-1">
+                  <button
+                    type="button"
+                    disabled={isSubmitting}
+                    onClick={() => executeOrderSubmission('qris')}
+                    className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-md transition-all active:scale-98 flex items-center justify-center gap-2"
+                  >
+                    {isSubmitting ? (
+                      <span>Memproses Pesanan...</span>
+                    ) : (
+                      <>
+                        <CheckCircle2 className="w-4 h-4" />
+                        <span>Saya Sudah Bayar via QRIS 🚀</span>
+                      </>
+                    )}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowQrisModal(false);
+                      setPaymentChoice('cash');
+                    }}
+                    className="w-full py-1.5 text-xs font-semibold text-slate-500 hover:text-slate-800"
+                  >
+                    Ubah ke Bayar di Kasir (Tunai)
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}

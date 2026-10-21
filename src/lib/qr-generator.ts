@@ -176,9 +176,10 @@ export async function generateDynamicQrisWithLogo(
   amount: number,
   merchantName: string,
   logoUrl?: string | null,
-  options: QrOptions = {}
+  options: QrOptions = {},
+  rawPayload?: string
 ): Promise<{ payload: string; dataUrl: string }> {
-  const payload = buildDynamicQrisPayload(amount, merchantName);
+  const payload = rawPayload || buildDynamicQrisPayload(amount, merchantName);
   const dataUrl = await generateQrWithLogo(payload, logoUrl, options);
   return { payload, dataUrl };
 }
