@@ -6,7 +6,7 @@ import {
   Sale, CashSession, TableItem, BusinessMember, 
   CartLineItem, OrderType, PaymentMethod, BusinessType,
   KitchenOrderStatus, UserRole, PermissionKey,
-  StockAdjustment, PurchaseOrder 
+  StockAdjustment, PurchaseOrder, HeldCart 
 } from '@/types';
 import { loadStore, saveStore, resetStore, getInitialStore, resetToDemoStore, getEmptyStore, AppStoreData } from '@/lib/data/store';
 import { useAuth } from './AuthContext';
@@ -60,12 +60,17 @@ interface BusinessContextType {
     paymentMethod: PaymentMethod;
     orderType: OrderType;
     tableNumber?: string;
+    tableId?: string;
     customerName?: string;
   }) => Promise<{ success: boolean; sale?: Sale; error?: string }>;
   openShift: (openingCash: number, notes?: string) => Promise<CashSession>;
   closeShift: (actualCash: number, notes?: string) => Promise<CashSession>;
   recordCashMovement: (type: 'cash_in' | 'cash_out', amount: number, reason: string) => Promise<{ success: boolean; error?: string }>;
   addEmployee: (displayName: string, username: string, role: UserRole, branchIds: string[], initialPassword: string) => Promise<{ success: boolean; error?: string }>;
+  heldCarts: HeldCart[];
+  holdCart: (customerTag: string, lineItems: CartLineItem[], subtotal: number, discount: number, grandTotal: number) => HeldCart;
+  removeHeldCart: (id: string) => void;
+  refundSale: (data: { saleId: string; reason: string; refundPaymentMethod?: PaymentMethod }) => Promise<{ success: boolean; sale?: Sale; error?: string }>;
   sellInDevice: (data: {
     imei: string;
     imei2?: string;
@@ -79,12 +84,24 @@ interface BusinessContextType {
     sellingPrice: number;
     customerName: string;
     notes?: string;
-  }) => { success: boolean; unit?: ImeiUnit; error?: string };
+  }) => Promise<{ success: boolean; unit?: ImeiUnit; error?: string }>;
   exchangeImei: (oldImei: string, newImei: string, reason: string, differenceFee: number) => Promise<{ success: boolean; error?: string }>;
   addTable: (tableNumber: string, capacity?: number) => TableItem;
   deleteTable: (tableId: string) => void;
   updateTableStatus: (tableId: string, status: 'available' | 'occupied' | 'reserved', customerName?: string) => void;
-  updateOrderStatus: (saleId: string, status: KitchenOrderStatus) => void;
+  moveTable: (fromTableId: string, toTableId: string) => Promise<{ success: boolean; error?: string }>;
+  mergeTables: (fromTableId: string, targetTableId: string) => Promise<{ success: boolean; error?: string }>;
+  openFnBOrder: (orderData: {
+    orderType: 'dine_in' | 'takeaway';
+    tableId?: string;
+    tableNumber?: string;
+    customerName?: string;
+    lineItems: CartLineItem[];
+    notes?: string;
+  }) => Promise<{ success: boolean; sale?: Sale; error?: string }>;
+  addItemsToFnBOrder: (saleId: string, lineItems: CartLineItem[]) => Promise<{ success: boolean; sale?: Sale; error?: string }>;
+  cancelFnBOrder: (saleId: string, reason: string) => Promise<{ success: boolean; error?: string }>;
+  updateOrderStatus: (saleId: string, status: KitchenOrderStatus) => Promise<void>;
   requestStockAdjustment: (data: {
     productId: string;
     productName: string;
@@ -125,6 +142,7 @@ export function BusinessProvider({ children }: { children: React.ReactNode }) {
   const [activeBusinessId, setActiveBusinessId] = useState<string | null>(null);
   const [activeBranchId, setActiveBranchId] = useState<string | null>(null);
   const isCheckingOutRef = useRef(false);
+  const [heldCarts, setHeldCarts] = useState<HeldCart[]>([]);
   const [isOnline, setIsOnline] = useState<boolean>(
     typeof navigator !== 'undefined' ? navigator.onLine : true
   );
@@ -251,6 +269,7 @@ export function BusinessProvider({ children }: { children: React.ReactNode }) {
         let newPurchaseOrders = prev.purchaseOrders;
         let newImeiHistories = prev.imeiHistories;
         let newCashSessions = prev.cashSessions;
+        let newTables = prev.tables;
 
         if (updates.products !== undefined) {
           const other = prev.products.filter(p => p.businessId !== activeBusinessId);
@@ -279,6 +298,12 @@ export function BusinessProvider({ children }: { children: React.ReactNode }) {
             if (!saleMap.has(s.id)) saleMap.set(s.id, s);
           });
           newSales = Array.from(saleMap.values()).sort((a, b) => b.createdAt - a.createdAt);
+          hasChanges = true;
+        }
+
+        if (updates.tables !== undefined) {
+          const other = (prev.tables || []).filter(t => t.businessId !== activeBusinessId);
+          newTables = [...other, ...updates.tables];
           hasChanges = true;
         }
 
@@ -320,6 +345,7 @@ export function BusinessProvider({ children }: { children: React.ReactNode }) {
           branches: newBranches,
           members: newMembers,
           sales: newSales,
+          tables: newTables,
           imeiUnits: newImeiUnits,
           stockAdjustments: newStockAdjustments,
           purchaseOrders: newPurchaseOrders,
@@ -859,6 +885,7 @@ export function BusinessProvider({ children }: { children: React.ReactNode }) {
     paymentMethod: PaymentMethod;
     orderType: OrderType;
     tableNumber?: string;
+    tableId?: string;
     customerName?: string;
   }): Promise<{ success: boolean; sale?: Sale; error?: string }> => {
     if (isCheckingOutRef.current) {
@@ -887,6 +914,7 @@ export function BusinessProvider({ children }: { children: React.ReactNode }) {
         paymentMethod: payload.paymentMethod,
         orderType: payload.orderType,
         tableNumber: payload.tableNumber,
+        tableId: payload.tableId,
         customerName: payload.customerName,
         cashSessionId: activeShift?.id,
       }, getIdToken);
@@ -1176,7 +1204,99 @@ export function BusinessProvider({ children }: { children: React.ReactNode }) {
   };
 
 
-  const sellInDevice = (data: {
+  const holdCart = (
+    customerTag: string, 
+    lineItems: CartLineItem[], 
+    subtotal: number, 
+    discount: number, 
+    grandTotal: number
+  ): HeldCart => {
+    const newHeld: HeldCart = {
+      id: `held_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      businessId: activeBusinessId || '',
+      branchId: activeBranch?.id || '',
+      customerTag: customerTag.trim() || undefined,
+      lineItems,
+      subtotal,
+      discount,
+      grandTotal,
+      createdAt: Date.now(),
+      cashierId: user?.uid || '',
+      cashierName: user?.displayName || 'Kasir',
+    };
+    setHeldCarts(prev => [newHeld, ...prev]);
+    return newHeld;
+  };
+
+  const removeHeldCart = (id: string) => {
+    setHeldCarts(prev => prev.filter(c => c.id !== id));
+  };
+
+  const refundSale = async (data: {
+    saleId: string;
+    reason: string;
+    refundPaymentMethod?: PaymentMethod;
+  }): Promise<{ success: boolean; sale?: Sale; error?: string }> => {
+    try {
+      const token = await getIdToken();
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
+      const res = await fetch('/api/sales/refund', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          businessId: activeBusinessId,
+          branchId: activeBranch?.id || 'br_main',
+          saleId: data.saleId,
+          reason: data.reason,
+          refundPaymentMethod: data.refundPaymentMethod,
+        }),
+      });
+
+      const resData = await res.json();
+      if (!res.ok || !resData.success) {
+        return { success: false, error: resData.message || 'Gagal memproses refund transaksi.' };
+      }
+
+      const refundedSale: Sale = resData.sale;
+
+      setStoreData(prev => {
+        const updatedSales = prev.sales.map(s => s.id === refundedSale.id ? refundedSale : s);
+        // Also restore physical stock in local storeData if non-serialized
+        const updatedProducts = prev.products.map(p => {
+          const item = refundedSale.lineItems.find(li => li.productId === p.id && !li.imei);
+          if (item) {
+            return { ...p, stockQty: p.stockQty + item.quantity };
+          }
+          return p;
+        });
+        // Also restore IMEI units to available
+        const updatedImeis = prev.imeiUnits.map(u => {
+          const item = refundedSale.lineItems.find(li => li.imei === u.imei);
+          if (item) {
+            return { ...u, status: 'available' as const, soldAtSaleId: '' };
+          }
+          return u;
+        });
+
+        const nextStore = {
+          ...prev,
+          sales: updatedSales,
+          products: updatedProducts,
+          imeiUnits: updatedImeis,
+        };
+        saveStore(nextStore, user?.uid, !canViewCostPrice);
+        return nextStore;
+      });
+
+      return { success: true, sale: refundedSale };
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Terjadi gangguan jaringan saat memproses refund.' };
+    }
+  };
+
+  const sellInDevice = async (data: {
     imei: string;
     imei2?: string;
     serialNumber?: string;
@@ -1189,134 +1309,54 @@ export function BusinessProvider({ children }: { children: React.ReactNode }) {
     sellingPrice: number;
     customerName: string;
     notes?: string;
-  }): { success: boolean; unit?: ImeiUnit; error?: string } => {
-    const valResult = validateDualSimDevice({
-      imei1: data.imei,
-      imei2: data.imei2,
-      serialNumber: data.serialNumber,
-    });
+  }): Promise<{ success: boolean; unit?: ImeiUnit; error?: string }> => {
+    try {
+      const token = await getIdToken();
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
 
-    if (!valResult.valid) {
-      return { success: false, error: valResult.error || 'Format IMEI tidak valid.' };
-    }
-
-    const cleanImei = valResult.imei1;
-    const cleanImei2 = valResult.imei2;
-    const cleanSn = valResult.serialNumber;
-    const newStore = { ...storeData };
-
-    const exists = newStore.imeiUnits.find(u => 
-      (u.imei === cleanImei || (cleanImei2 && u.imei === cleanImei2) || (u.imei2 && u.imei2 === cleanImei)) && 
-      (u.status === 'available' || u.status === 'reserved')
-    );
-    if (exists) {
-      return { success: false, error: `IMEI ${cleanImei} sudah terdaftar dan berstatus aktif di sistem.` };
-    }
-
-    // Find or create device product definition
-    let prod = newStore.products.find(p => p.brand === data.brand && p.model === data.model);
-    if (!prod) {
-      const newProduct: Product = {
-        id: `prod_ph_${Date.now()}`,
-        businessId: activeBusinessId || '',
-        name: `${data.brand} ${data.model} ${data.storage} (${data.condition === 'new' ? 'Baru' : 'Second'})`,
-        category: 'Smartphone',
-        brand: data.brand,
-        model: data.model,
-        storage: data.storage,
-        color: data.color,
-        condition: data.condition,
-        costPrice: data.costPrice,
-        sellingPrice: data.sellingPrice,
-        available: true,
-        trackStock: true,
-        stockQty: 1,
-      };
-      newStore.products.push(newProduct);
-      prod = newProduct;
-    } else {
-      prod.stockQty += 1;
-    }
-
-    const now = Date.now();
-    const unitId = `imei_unit_${now}`;
-    const newUnit: ImeiUnit = {
-      id: unitId,
-      businessId: activeBusinessId || '',
-      branchId: activeBranch?.id || 'br_roxy',
-      imei: cleanImei,
-      imei2: cleanImei2,
-      serialNumber: cleanSn,
-      productId: prod.id,
-      productName: prod.name,
-      brand: data.brand,
-      model: data.model,
-      storage: data.storage,
-      color: data.color,
-      condition: data.condition,
-      costPrice: data.costPrice,
-      sellingPrice: data.sellingPrice,
-      status: 'available',
-      warrantyUntil: now + 90 * 86400000,
-      source: 'direct_sell_in',
-      supplierOrCustomerName: data.customerName,
-      notes: data.notes,
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    newStore.imeiUnits.push(newUnit);
-    const histItem: ImeiHistory = {
-      id: `hist_${now}`,
-      businessId: activeBusinessId || '',
-      imei: cleanImei,
-      imei2: cleanImei2,
-      serialNumber: cleanSn,
-      unitId,
-      action: 'received',
-      referenceId: `SELLIN-${now}`,
-      branchId: activeBranch?.id || 'br_roxy',
-      operatorId: user?.uid || 'usr_staff',
-      operatorName: user?.displayName || 'Staf Gadget',
-      notes: `Penerimaan Sell-In langsung dari customer ${data.customerName}${cleanImei2 ? ` [Dual-SIM IMEI 2: ${cleanImei2}]` : ''}`,
-      timestamp: now,
-    };
-    newStore.imeiHistories.unshift(histItem);
-
-    saveStore(newStore, user?.uid);
-    setStoreData(newStore);
-
-    if (activeBusinessId) {
-      setDoc(doc(db, `businesses/${activeBusinessId}/imeiUnits/${unitId}`), cleanUndefined(newUnit)).catch(err => {
-        console.warn("Direct SellIn unit sync notice:", err);
-      });
-      setDoc(doc(db, `businesses/${activeBusinessId}/registeredImeis/${cleanImei}`), {
-        imei: cleanImei,
-        unitId,
-        businessId: activeBusinessId,
-        isPrimary: true,
-        registeredAt: now,
-      }).catch(err => console.warn("Reg IMEI sync notice:", err));
-      if (cleanImei2) {
-        setDoc(doc(db, `businesses/${activeBusinessId}/registeredImeis/${cleanImei2}`), {
-          imei: cleanImei2,
-          unitId,
+      const res = await fetch('/api/phone/sell-in', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
           businessId: activeBusinessId,
-          isSecondary: true,
-          registeredAt: now,
-        }).catch(err => console.warn("Reg IMEI 2 sync notice:", err));
-      }
-      setDoc(doc(db, `businesses/${activeBusinessId}/imeiHistory/${histItem.id}`), cleanUndefined(histItem)).catch(err => {
-        console.warn("Direct SellIn history sync notice:", err);
+          branchId: activeBranch?.id || 'br_main',
+          imei: data.imei,
+          imei2: data.imei2,
+          serialNumber: data.serialNumber,
+          brand: data.brand,
+          model: data.model,
+          storage: data.storage,
+          color: data.color,
+          condition: data.condition,
+          costPrice: data.costPrice,
+          sellingPrice: data.sellingPrice,
+          customerName: data.customerName,
+          cashSessionId: activeShift?.id,
+          notes: data.notes,
+        }),
       });
-      if (prod) {
-        setDoc(doc(db, `businesses/${activeBusinessId}/products/${prod.id}`), cleanUndefined(prod), { merge: true }).catch(err => {
-          console.warn("Product stock sync notice:", err);
-        });
-      }
-    }
 
-    return { success: true, unit: newUnit };
+      const resData = await res.json();
+      if (!res.ok || !resData.success) {
+        return { success: false, error: resData.message || 'Gagal memproses Sell In perangkat.' };
+      }
+
+      const createdUnit: ImeiUnit = resData.unit;
+
+      setStoreData(prev => {
+        const nextStore = {
+          ...prev,
+          imeiUnits: [createdUnit, ...prev.imeiUnits.filter(u => u.imei !== createdUnit.imei)],
+        };
+        saveStore(nextStore, user?.uid, !canViewCostPrice);
+        return nextStore;
+      });
+
+      return { success: true, unit: createdUnit };
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Terjadi gangguan jaringan saat memproses Sell In.' };
+    }
   };
 
   const exchangeImei = async (
@@ -1356,6 +1396,7 @@ export function BusinessProvider({ children }: { children: React.ReactNode }) {
           newImei: newVal.normalized,
           reason,
           differenceFee,
+          cashSessionId: activeShift?.id,
         }),
       });
 
@@ -1375,7 +1416,7 @@ export function BusinessProvider({ children }: { children: React.ReactNode }) {
       if (replacementUnit) {
         replacementUnit.status = 'sold';
       }
-      saveStore(newStore, user?.uid);
+      saveStore(newStore, user?.uid, !canViewCostPrice);
       setStoreData(newStore);
 
       return { success: true };
@@ -1384,10 +1425,8 @@ export function BusinessProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-
   const addTable = (tableNumber: string, capacity: number = 4): TableItem => {
-    const newStore = { ...storeData };
-    const branchId = branches[0]?.id || 'branch_default';
+    const branchId = activeBranch?.id || branches[0]?.id || 'branch_default';
     const newTbl: TableItem = {
       id: `tbl_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
       businessId: activeBusinessId || '',
@@ -1396,44 +1435,277 @@ export function BusinessProvider({ children }: { children: React.ReactNode }) {
       capacity,
       status: 'available',
     };
-    newStore.tables.push(newTbl);
-    saveStore(newStore, user?.uid);
-    setStoreData(newStore);
+
+    setStoreData(prev => {
+      const nextStore = { ...prev, tables: [...(prev.tables || []), newTbl] };
+      saveStore(nextStore, user?.uid, !canViewCostPrice);
+      return nextStore;
+    });
+
+    if (activeBusinessId) {
+      getIdToken().then(token => {
+        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+        fetch('/api/fnb/tables', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            action: 'create',
+            businessId: activeBusinessId,
+            branchId,
+            tableNumber,
+            capacity,
+          }),
+        }).catch(err => console.warn('Failed to sync table create to backend:', err));
+      });
+    }
+
     return newTbl;
   };
 
   const deleteTable = (tableId: string) => {
-    const newStore = { ...storeData };
-    newStore.tables = newStore.tables.filter(t => t.id !== tableId);
-    saveStore(newStore, user?.uid);
-    setStoreData(newStore);
+    setStoreData(prev => {
+      const nextStore = { ...prev, tables: (prev.tables || []).filter(t => t.id !== tableId) };
+      saveStore(nextStore, user?.uid, !canViewCostPrice);
+      return nextStore;
+    });
+
+    if (activeBusinessId) {
+      getIdToken().then(token => {
+        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+        fetch('/api/fnb/tables', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            action: 'delete',
+            businessId: activeBusinessId,
+            branchId: activeBranch?.id || branches[0]?.id || 'branch_default',
+            tableId,
+          }),
+        }).catch(err => console.warn('Failed to sync table delete to backend:', err));
+      });
+    }
   };
 
   const updateTableStatus = (tableId: string, status: 'available' | 'occupied' | 'reserved', customerName?: string) => {
-    const newStore = { ...storeData };
-    const tbl = newStore.tables.find(t => t.id === tableId);
-    if (tbl) {
-      tbl.status = status;
-      if (status === 'available') {
-        tbl.customerName = undefined;
-        tbl.activeSaleId = undefined;
-      } else if (customerName) {
-        tbl.customerName = customerName;
-      }
-      saveStore(newStore, user?.uid);
-      setStoreData(newStore);
+    setStoreData(prev => {
+      const updatedTables = (prev.tables || []).map(t => {
+        if (t.id === tableId) {
+          return {
+            ...t,
+            status,
+            customerName: status === 'available' ? undefined : (customerName ?? t.customerName),
+            activeSaleId: status === 'available' ? undefined : t.activeSaleId,
+          };
+        }
+        return t;
+      });
+      const nextStore = { ...prev, tables: updatedTables };
+      saveStore(nextStore, user?.uid, !canViewCostPrice);
+      return nextStore;
+    });
+
+    if (activeBusinessId) {
+      getIdToken().then(token => {
+        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+        fetch('/api/fnb/tables', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            action: 'update_status',
+            businessId: activeBusinessId,
+            branchId: activeBranch?.id || branches[0]?.id || 'branch_default',
+            tableId,
+            status,
+            customerName,
+          }),
+        }).catch(err => console.warn('Failed to sync table status to backend:', err));
+      });
     }
   };
 
-  const updateOrderStatus = (saleId: string, status: KitchenOrderStatus) => {
-    const newStore = { ...storeData };
-    const s = newStore.sales.find(item => item.id === saleId);
-    if (s) {
-      s.orderStatus = status;
-      s.updatedAt = Date.now();
-      saveStore(newStore);
-      setStoreData(newStore);
+  const moveTable = async (fromTableId: string, toTableId: string): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const token = await getIdToken();
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
+      const res = await fetch('/api/fnb/tables', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          action: 'move_table',
+          businessId: activeBusinessId,
+          branchId: activeBranch?.id || branches[0]?.id || 'branch_default',
+          fromTableId,
+          toTableId,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        return { success: false, error: data.message || 'Gagal memindahkan meja.' };
+      }
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Gagal menghubungi server untuk pindah meja.' };
     }
+  };
+
+  const mergeTables = async (fromTableId: string, targetTableId: string): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const token = await getIdToken();
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
+      const res = await fetch('/api/fnb/tables', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          action: 'merge_tables',
+          businessId: activeBusinessId,
+          branchId: activeBranch?.id || branches[0]?.id || 'branch_default',
+          fromTableId,
+          targetTableId,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        return { success: false, error: data.message || 'Gagal menggabungkan meja.' };
+      }
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Gagal menghubungi server untuk gabung meja.' };
+    }
+  };
+
+  const openFnBOrder = async (orderData: {
+    orderType: 'dine_in' | 'takeaway';
+    tableId?: string;
+    tableNumber?: string;
+    customerName?: string;
+    lineItems: CartLineItem[];
+    notes?: string;
+  }): Promise<{ success: boolean; sale?: Sale; error?: string }> => {
+    try {
+      const token = await getIdToken();
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
+      const res = await fetch('/api/fnb/orders', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          action: 'open',
+          businessId: activeBusinessId,
+          branchId: activeBranch?.id || branches[0]?.id || 'branch_default',
+          ...orderData,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        return { success: false, error: data.message || 'Gagal membuka pesanan meja.' };
+      }
+      return { success: true, sale: data.sale };
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Gagal menghubungi server pesanan F&B.' };
+    }
+  };
+
+  const addItemsToFnBOrder = async (
+    saleId: string, 
+    lineItems: CartLineItem[]
+  ): Promise<{ success: boolean; sale?: Sale; error?: string }> => {
+    try {
+      const token = await getIdToken();
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
+      const res = await fetch('/api/fnb/orders', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          action: 'add_items',
+          businessId: activeBusinessId,
+          branchId: activeBranch?.id || branches[0]?.id || 'branch_default',
+          saleId,
+          lineItems,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        return { success: false, error: data.message || 'Gagal menambah item ke pesanan.' };
+      }
+      return { success: true, sale: data.sale };
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Gagal menghubungi server untuk menambah item.' };
+    }
+  };
+
+  const cancelFnBOrder = async (
+    saleId: string, 
+    reason: string
+  ): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const token = await getIdToken();
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
+      const res = await fetch('/api/fnb/orders', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          action: 'cancel',
+          businessId: activeBusinessId,
+          branchId: activeBranch?.id || branches[0]?.id || 'branch_default',
+          saleId,
+          reason,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        return { success: false, error: data.message || 'Gagal membatalkan pesanan.' };
+      }
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Gagal menghubungi server untuk pembatalan pesanan.' };
+    }
+  };
+
+  const updateOrderStatus = async (saleId: string, status: KitchenOrderStatus) => {
+    try {
+      const token = await getIdToken();
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
+      await fetch('/api/fnb/kitchen/orders', {
+        method: 'PATCH',
+        headers,
+        body: JSON.stringify({
+          businessId: activeBusinessId,
+          branchId: activeBranch?.id || 'br_main',
+          saleId,
+          orderStatus: status,
+        }),
+      });
+    } catch (e) {
+      console.warn("Kitchen order sync notice:", e);
+    }
+
+    setStoreData(prev => {
+      const updatedSales = prev.sales.map(s => 
+        s.id === saleId ? { ...s, orderStatus: status, updatedAt: Date.now() } : s
+      );
+      const nextStore = { ...prev, sales: updatedSales };
+      saveStore(nextStore, user?.uid, !canViewCostPrice);
+      return nextStore;
+    });
   };
 
   const requestStockAdjustment = async (data: {
@@ -1758,11 +2030,20 @@ export function BusinessProvider({ children }: { children: React.ReactNode }) {
       closeShift,
       recordCashMovement,
       addEmployee,
+      heldCarts,
+      holdCart,
+      removeHeldCart,
+      refundSale,
       sellInDevice,
       exchangeImei,
       addTable,
       deleteTable,
       updateTableStatus,
+      moveTable,
+      mergeTables,
+      openFnBOrder,
+      addItemsToFnBOrder,
+      cancelFnBOrder,
       updateOrderStatus,
       requestStockAdjustment,
       reviewStockAdjustment,

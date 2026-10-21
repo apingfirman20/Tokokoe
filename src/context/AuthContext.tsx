@@ -7,6 +7,9 @@ import {
   signInWithEmailAndPassword, 
   createUserWithEmailAndPassword, 
   signInWithCustomToken, 
+  signInWithPopup,
+  GoogleAuthProvider,
+  sendPasswordResetEmail,
   signOut, 
   onAuthStateChanged, 
   updateProfile,
@@ -30,6 +33,8 @@ interface AuthContextType {
   isLoading: boolean;
   loginAsOwner: (email: string, pass: string) => Promise<{ success: boolean; error?: string }>;
   loginAsEmployee: (username: string, pass: string) => Promise<{ success: boolean; businessId?: string; mustChangePassword?: boolean; user?: any; error?: string }>;
+  loginWithGoogle?: () => Promise<{ success: boolean; error?: string }>;
+  resetPassword?: (email: string) => Promise<{ success: boolean; error?: string }>;
   registerOwner: (name: string, email: string, pass: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => Promise<void>;
   getIdToken: () => Promise<string | null>;
@@ -236,6 +241,49 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const loginWithGoogle = async (): Promise<{ success: boolean; error?: string }> => {
+    setIsLoading(true);
+    try {
+      const provider = new GoogleAuthProvider();
+      await signInWithPopup(auth, provider);
+      return { success: true };
+    } catch (err: any) {
+      console.error("Firebase Google sign-in error:", err);
+      const code = err.code || '';
+      let message = 'Gagal masuk dengan Google.';
+      if (code === 'auth/popup-closed-by-user') {
+        message = 'Jendela login Google ditutup sebelum selesai.';
+      } else if (code === 'auth/cancelled-popup-request') {
+        message = 'Permintaan login Google dibatalkan.';
+      } else if (code === 'auth/unauthorized-domain') {
+        message = 'Domain aplikasi ini belum diizinkan untuk login Google di Firebase Console.';
+      }
+      return { success: false, error: message };
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const resetPassword = async (email: string): Promise<{ success: boolean; error?: string }> => {
+    try {
+      if (!email || !email.includes('@')) {
+        return { success: false, error: 'Masukkan alamat email yang valid untuk reset kata sandi.' };
+      }
+      await sendPasswordResetEmail(auth, email);
+      return { success: true };
+    } catch (err: any) {
+      console.error("Firebase reset password error:", err);
+      const code = err.code || '';
+      let message = 'Gagal mengirim instruksi reset kata sandi.';
+      if (code === 'auth/user-not-found') {
+        message = 'Email tidak ditemukan dalam sistem.';
+      } else if (code === 'auth/invalid-email') {
+        message = 'Format email tidak valid.';
+      }
+      return { success: false, error: message };
+    }
+  };
+
   const logout = async () => {
     try {
       await signOut(auth);
@@ -252,6 +300,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       isLoading, 
       loginAsOwner, 
       loginAsEmployee, 
+      loginWithGoogle,
+      resetPassword,
       registerOwner, 
       logout,
       getIdToken

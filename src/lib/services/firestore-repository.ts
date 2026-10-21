@@ -20,7 +20,8 @@ import {
   ImeiHistory,
   PurchaseOrder, 
   StockAdjustment, 
-  CashSession 
+  CashSession,
+  TableItem
 } from "@/types";
 
 export interface BusinessTenantSnapshot {
@@ -29,6 +30,7 @@ export interface BusinessTenantSnapshot {
   products: Product[];
   members: BusinessMember[];
   sales: Sale[];
+  tables: TableItem[];
   imeiUnits: ImeiUnit[];
   imeiHistories: ImeiHistory[];
   purchaseOrders: PurchaseOrder[];
@@ -175,6 +177,21 @@ export function subscribeToBusinessTenant(
       }
     );
     unsubscribers.push(unsubCash);
+
+    // 10. Tables collection real-time listener (F&B Multi-session Sync)
+    const tablesRef = collection(db, `businesses/${businessId}/tables`);
+    const unsubTables = onSnapshot(
+      tablesRef,
+      (snapshot) => {
+        const tables = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as TableItem));
+        tables.sort((a, b) => a.tableNumber.localeCompare(b.tableNumber, undefined, { numeric: true }));
+        onUpdate({ tables });
+      },
+      (err) => {
+        console.warn("Firestore Tables live listener notice:", err.message);
+      }
+    );
+    unsubscribers.push(unsubTables);
 
   } catch (err: any) {
     console.warn("Firestore real-time subscription setup notice:", err.message);

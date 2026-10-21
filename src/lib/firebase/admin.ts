@@ -1,6 +1,8 @@
 import { initializeApp, getApps, getApp, cert, type App } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore } from "firebase-admin/firestore";
+import fs from "fs";
+import path from "path";
 
 function getAdminApp(): App {
   const apps = getApps();
@@ -32,8 +34,6 @@ function getAdminApp(): App {
 
   // Fallback: Check for service-account.json file in local environment
   try {
-    const fs = require("fs");
-    const path = require("path");
     const saPath = path.join(process.cwd(), "service-account.json");
     if (fs.existsSync(saPath)) {
       const sa = JSON.parse(fs.readFileSync(saPath, "utf8"));

@@ -2,8 +2,9 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { adminDb } from "@/lib/firebase/admin";
 import { generateSaleReference, cleanUndefined } from "@/lib/utils";
-import { Sale, CartLineItem, StockMovement, Business } from "@/types";
-import { normalizeImei } from "@/lib/validation/imei";
+import { Sale, CartLineItem, StockMovement, Business, TableItem, ImeiHistory, ImeiUnit, PaymentStatus } from "@/types";
+import { normalizeImei, validateImei, validateDualSimDevice } from "@/lib/validation/imei";
+import { midtransAdapter } from "@/lib/payments/midtrans-adapter";
 import { 
   requireAuthenticatedUser, 
   requireBusinessPermission, 
@@ -20,6 +21,17 @@ const lineItemSchema = z.object({
   imei: z.string().optional(),
   selectedImei: z.string().optional(),
   notes: z.string().optional(),
+  selectedOptions: z.record(z.string(), z.string()).optional(),
+  selectedModifiers: z.array(z.string()).optional(),
+});
+
+const tradeInSchema = z.object({
+  deviceModel: z.string().min(1, "Model HP tukar tambah wajib diisi"),
+  imei: z.string().min(14, "IMEI HP tukar tambah wajib minimal 14 digit"),
+  imei2: z.string().optional(),
+  condition: z.string().optional(),
+  estimatedValue: z.number().int("Nilai taksir harus bilangan bulat").positive("Nilai taksir harus lebih dari 0"),
+  customerName: z.string().optional(),
 });
 
 const checkoutSchema = z.object({
@@ -28,14 +40,19 @@ const checkoutSchema = z.object({
   customerName: z.string().optional(),
   orderType: z.enum(['dine_in', 'takeaway', 'delivery', 'retail_pos', 'phone_pos']),
   tableNumber: z.string().optional(),
+  tableId: z.string().optional(),
+  openSaleId: z.string().optional(),
   lineItems: z.array(lineItemSchema).min(1, "Keranjang belanja tidak boleh kosong"),
   discount: z.number().int("Diskon harus berupa bilangan bulat").nonnegative("Diskon tidak boleh negatif").default(0),
   tax: z.number().int("Pajak harus berupa bilangan bulat").nonnegative("Pajak tidak boleh negatif").default(0),
   serviceCharge: z.number().int("Service charge harus berupa bilangan bulat").nonnegative("Service charge tidak boleh negatif").default(0),
-  paidAmount: z.number().int("Jumlah pembayaran harus berupa bilangan bulat").nonnegative("Jumlah pembayaran tidak boleh negatif"),
+  paidAmount: z.number().int("Jumlah pembayaran harus berupa bilangan bulat").nonnegative("Jumlah pembayaran tidak boleh negatif").default(0),
   paymentMethod: z.enum(['cash', 'transfer', 'midtrans_qris']),
   cashSessionId: z.string().optional(),
   idempotencyKey: z.string().optional(),
+  tradeIn: tradeInSchema.optional(),
+  transferReferenceNumber: z.string().optional(),
+  isTransferVerified: z.boolean().optional(),
 });
 
 export async function POST(request: Request) {
@@ -60,7 +77,7 @@ export async function POST(request: Request) {
     await requireBranchAccess(payload.businessId, authUser.uid, payload.branchId);
 
     const now = Date.now();
-    const saleId = `sale_${now}_${Math.random().toString(36).substring(2, 7)}`;
+    const saleId = payload.openSaleId || `sale_${now}_${Math.random().toString(36).substring(2, 7)}`;
     const saleNumber = generateSaleReference();
 
     // 3. Compute Canonical Request Fingerprint & Idempotency Key
@@ -68,28 +85,36 @@ export async function POST(request: Request) {
       .map(i => {
         const rawImei = i.imei || i.selectedImei;
         const cleanImei = rawImei ? normalizeImei(rawImei) : '';
-        return `${i.productId}:${i.quantity}:${cleanImei}`;
+        const opts = JSON.stringify(i.selectedOptions || {});
+        const mods = (i.selectedModifiers || []).sort().join(',');
+        return `${i.productId}:${i.quantity}:${cleanImei}:${opts}:${mods}`;
       })
       .sort()
       .join('|');
+
+    const tradeInFingerprint = payload.tradeIn ? `${payload.tradeIn.imei}:${payload.tradeIn.estimatedValue}` : 'none';
 
     const requestFingerprint = [
       payload.businessId,
       payload.branchId,
       authUser.uid,
       normalizedItemsFingerprint,
+      tradeInFingerprint,
+      payload.discount,
+      payload.tax,
+      payload.serviceCharge,
       payload.paidAmount,
       payload.paymentMethod,
-    ].join('::');
+    ].join('__');
 
-    const effectiveIdempotencyKey = payload.idempotencyKey || 
-      `idem_auto_${payload.businessId}_${payload.branchId}_${authUser.uid}_${normalizedItemsFingerprint}_${payload.paidAmount}_${Math.floor(now / 5000)}`;
+    const effectiveIdempotencyKey = payload.idempotencyKey?.trim() || `idem_${requestFingerprint}`;
 
+    // 4. Pre-transaction Idempotency Check
     const idemRef = adminDb.doc(`businesses/${payload.businessId}/idempotencyKeys/${effectiveIdempotencyKey}`);
     const idemDoc = await idemRef.get();
+
     if (idemDoc.exists) {
       const idemData = idemDoc.data();
-      // Reuse key dengan isi berbeda harus ditolak (409 Conflict)
       if (idemData?.requestFingerprint && idemData.requestFingerprint !== requestFingerprint) {
         return NextResponse.json(
           { 
@@ -99,33 +124,54 @@ export async function POST(request: Request) {
           { status: 409 }
         );
       }
+
       if (idemData?.saleId) {
         const existingSaleDoc = await adminDb.doc(`businesses/${payload.businessId}/sales/${idemData.saleId}`).get();
         if (existingSaleDoc.exists) {
-          // Replay tidak boleh mengurangi stok, menambah sale, atau mengubah kas lagi
           return NextResponse.json({
             success: true,
             sale: existingSaleDoc.data() as Sale,
             persistedToFirestore: true,
             idempotentDuplicate: true,
-            message: "Transaksi telah berhasil diproses sebelumnya (duplikasi transaksi dicegah secara otomatis)."
+            idempotentReplay: true,
+            message: "Transaksi telah berhasil diproses sebelumnya (Idempotent Replay). Tidak ada mutasi stok ganda."
           });
         }
       }
     }
 
-    // 4. Determine authoritative payment status
-    const paymentStatus: 'paid' | 'pending' = payload.paymentMethod === 'midtrans_qris' ? 'pending' : 'paid';
+    // 5. Determine Authoritative Payment Lifecycle Status
+    let paymentStatus: PaymentStatus = 'paid';
+    let settledAt: number | undefined = now;
+    let midtransOrderId: string | undefined = undefined;
+
+    if (payload.paymentMethod === 'midtrans_qris') {
+      paymentStatus = 'pending';
+      settledAt = undefined;
+      midtransOrderId = `${payload.businessId}__${saleId}`;
+    } else if (payload.paymentMethod === 'transfer') {
+      // Policy: Bank Transfer is strictly pending unless explicitly verified with transfer reference
+      if (payload.isTransferVerified && payload.transferReferenceNumber) {
+        paymentStatus = 'paid';
+        settledAt = now;
+      } else {
+        paymentStatus = 'pending';
+        settledAt = undefined;
+      }
+    } else {
+      // Cash payment
+      paymentStatus = 'paid';
+      settledAt = now;
+    }
 
     let newSale: Sale | null = null;
 
-    // 5. Atomic Firestore Transaction (Strict: ALL READS BEFORE ALL WRITES)
     await adminDb.runTransaction(async (transaction) => {
       // ----------------------------------------------------
       // PHASE A: ALL READS FIRST
       // ----------------------------------------------------
 
-      // 0. Atomic check for idempotency lock inside transaction
+      // Check idempotency again inside transaction
       const idemTxDoc = await transaction.get(idemRef);
       if (idemTxDoc.exists && idemTxDoc.data()?.saleId) {
         const existingSaleRef = adminDb.doc(`businesses/${payload.businessId}/sales/${idemTxDoc.data()!.saleId}`);
@@ -141,7 +187,7 @@ export async function POST(request: Request) {
       const bizDoc = await transaction.get(bizRef);
       const bizData = bizDoc.exists ? (bizDoc.data() as Business) : null;
 
-      // 2. Read and validate products for authoritative price and stock
+      // 2. Read and validate products for authoritative price, options, modifiers, and stock
       const productDocsMap = new Map<string, FirebaseFirestore.DocumentSnapshot>();
       const productQtyMap = new Map<string, number>();
 
@@ -185,7 +231,6 @@ export async function POST(request: Request) {
       for (const item of payload.lineItems) {
         const rawImei = item.imei || item.selectedImei;
         if (rawImei) {
-          // Invariant: Quantity must be exactly 1 per IMEI
           if (item.quantity !== 1) {
             throw new Error(`Kuantitas untuk produk bernomor IMEI (${item.productName || item.productId}) harus tepat 1 per perangkat.`);
           }
@@ -202,39 +247,108 @@ export async function POST(request: Request) {
           }
 
           const unitDoc = await transaction.get(unitRef);
+
           if (!unitDoc.exists) {
-            throw new Error(`Unit IMEI ${imei} tidak ditemukan di sistem.`);
+            throw new Error(`Unit dengan nomor IMEI ${imei} tidak ditemukan di sistem inventaris.`);
           }
 
-          const canonicalUnitId = unitDoc.id;
-          // Invariant: IMEI1 / IMEI2 cannot sell the same physical unit twice in one cart
-          if (seenUnitIds.has(canonicalUnitId)) {
-            throw new Error(`Terdapat duplikasi unit IMEI (atau alias IMEI 2 perangkat dual-SIM yang sama) dalam satu transaksi.`);
-          }
-          seenUnitIds.add(canonicalUnitId);
+          const unitData = unitDoc.data() as ImeiUnit;
 
-          const unitData = unitDoc.data();
-          if (unitData?.status !== 'available') {
-            throw new Error(`Unit IMEI ${imei} sudah tidak tersedia untuk dijual (status: ${unitData?.status}).`);
+          if (seenUnitIds.has(unitDoc.id)) {
+            throw new Error(`Terjadi duplikasi unit IMEI dalam keranjang: perangkat fisik yang sama (${imei}) dimasukkan lebih dari sekali (termasuk deteksi alias Dual-SIM).`);
           }
+          seenUnitIds.add(unitDoc.id);
 
-          // Invariant: Unit must match requested productId
-          if (unitData?.productId && unitData.productId !== item.productId) {
-            throw new Error(`Unit IMEI ${imei} terdaftar untuk produk "${unitData.productId}", tidak cocok dengan produk pesanan ("${item.productId}").`);
+          if (unitData.status !== 'available') {
+            throw new Error(`Unit bernomor IMEI ${imei} sudah tidak tersedia untuk dijual (status saat ini: ${unitData.status}).`);
           }
 
-          // Invariant: Unit must belong to the transaction branch
-          if (unitData?.branchId && unitData.branchId !== payload.branchId) {
+          if (unitData.branchId !== payload.branchId) {
             throw new Error(`Unit IMEI ${imei} berada di cabang ${unitData.branchId}, tidak dapat dijual di cabang transaksi ${payload.branchId}.`);
+          }
+
+          if (unitData.productId !== item.productId) {
+            throw new Error(`Unit IMEI ${imei} terdaftar untuk produk "${unitData.productName || unitData.productId}", bukan untuk "${item.productName || item.productId}".`);
           }
 
           imeiDocsMap.set(imei, { unitRef, unitDoc });
         }
       }
 
-      // 4. Read and validate Cash Session for cash payments
+      // 4. Read Recipe/BOM Ingredients consumption
+      const ingredientConsumptions = new Map<string, number>();
+      for (const item of payload.lineItems) {
+        const prodDoc = productDocsMap.get(item.productId);
+        const prodData = prodDoc?.exists ? prodDoc.data() : null;
+
+        // Finished product recipe
+        if (prodData?.recipe && Array.isArray(prodData.recipe)) {
+          for (const r of prodData.recipe) {
+            if (r.ingredientId && r.quantityRequired > 0) {
+              const current = ingredientConsumptions.get(r.ingredientId) || 0;
+              ingredientConsumptions.set(r.ingredientId, current + (r.quantityRequired * item.quantity));
+            }
+          }
+        }
+
+        // Selected Modifiers recipe
+        if (item.selectedModifiers && Array.isArray(item.selectedModifiers) && prodData?.modifiers) {
+          for (const modName of item.selectedModifiers) {
+            const modObj = prodData.modifiers.find((m: any) => m.name === modName);
+            if (modObj?.recipe && Array.isArray(modObj.recipe)) {
+              for (const mr of modObj.recipe) {
+                if (mr.ingredientId && mr.quantityRequired > 0) {
+                  const current = ingredientConsumptions.get(mr.ingredientId) || 0;
+                  ingredientConsumptions.set(mr.ingredientId, current + (mr.quantityRequired * item.quantity));
+                }
+              }
+            }
+          }
+        }
+      }
+
+      // Read all required ingredient docs
+      const ingredientDocsMap = new Map<string, FirebaseFirestore.DocumentSnapshot>();
+      for (const ingId of ingredientConsumptions.keys()) {
+        const ingRef = adminDb.doc(`businesses/${payload.businessId}/ingredients/${ingId}`);
+        const ingDoc = await transaction.get(ingRef);
+        ingredientDocsMap.set(ingId, ingDoc);
+      }
+
+      // 5. Read Trade-In device if provided
+      let tradeInRegDoc: any = null;
+      let cleanTradeInImei = '';
+      let cleanTradeInImei2 = '';
+      if (payload.tradeIn) {
+        const tVal = validateDualSimDevice({
+          imei1: payload.tradeIn.imei,
+          imei2: payload.tradeIn.imei2,
+        });
+        if (!tVal.valid) {
+          throw new Error(tVal.error || "Format IMEI unit tukar tambah tidak valid.");
+        }
+        cleanTradeInImei = tVal.imei1;
+        cleanTradeInImei2 = tVal.imei2 || '';
+
+        const tRegRef = adminDb.doc(`businesses/${payload.businessId}/registeredImeis/${cleanTradeInImei}`);
+        tradeInRegDoc = await transaction.get(tRegRef);
+        if (tradeInRegDoc.exists) {
+          throw new Error(`IMEI tukar tambah ${cleanTradeInImei} sudah terdaftar pada inventaris bisnis.`);
+        }
+      }
+
+      // 6. Read table if dine-in
+      let tableRef: any = null;
+      let tableDoc: any = null;
+      if (payload.tableId) {
+        tableRef = adminDb.doc(`businesses/${payload.businessId}/tables/${payload.tableId}`);
+        tableDoc = await transaction.get(tableRef);
+      }
+
+      // 7. Read Cash Session if cash sale
       let shiftDoc: FirebaseFirestore.DocumentSnapshot | null = null;
       let shiftRef: FirebaseFirestore.DocumentReference | null = null;
+
       if (payload.paymentMethod === 'cash') {
         if (payload.cashSessionId) {
           shiftRef = adminDb.doc(`businesses/${payload.businessId}/cashSessions/${payload.cashSessionId}`);
@@ -257,6 +371,7 @@ export async function POST(request: Request) {
       // AUTHORITATIVE PRICE CALCULATION & VERIFICATION
       // ----------------------------------------------------
       let authoritativeSubtotal = 0;
+      let totalCogs = 0;
       const verifiedLineItems: CartLineItem[] = [];
 
       for (const item of payload.lineItems) {
@@ -268,10 +383,39 @@ export async function POST(request: Request) {
         const imeiEntry = cleanImei ? imeiDocsMap.get(cleanImei) : null;
         const imeiData = imeiEntry?.unitDoc.exists ? imeiEntry.unitDoc.data() : null;
 
-        // Authoritative price: Strictly derive from server entity (never fallback to client unitPrice)
-        const authoritativeUnitPrice = imeiData?.sellingPrice ?? prodData?.sellingPrice ?? 0;
+        // Base price
+        const baseUnitPrice = imeiData?.sellingPrice ?? prodData?.sellingPrice ?? 0;
+
+        // Authoritative options surcharge
+        let optionsExtra = 0;
+        if (item.selectedOptions && prodData?.options) {
+          for (const [optName, choiceLabel] of Object.entries(item.selectedOptions)) {
+            const optObj = prodData.options.find((o: any) => o.name === optName);
+            if (optObj?.choices) {
+              const choice = optObj.choices.find((c: any) => c.label === choiceLabel);
+              if (choice?.extraPrice) optionsExtra += choice.extraPrice;
+            }
+          }
+        }
+
+        // Authoritative modifiers surcharge
+        let modifiersExtra = 0;
+        if (item.selectedModifiers && prodData?.modifiers) {
+          for (const modName of item.selectedModifiers) {
+            const modObj = prodData.modifiers.find((m: any) => m.name === modName);
+            if (modObj?.price) modifiersExtra += modObj.price;
+          }
+        }
+
+        const authoritativeUnitPrice = baseUnitPrice + optionsExtra + modifiersExtra;
         const lineSubtotal = authoritativeUnitPrice * item.quantity;
         authoritativeSubtotal += lineSubtotal;
+
+        // Historical protected cost price snapshot
+        const costSnapshot = typeof imeiData?.costPrice === 'number' 
+          ? imeiData.costPrice 
+          : (typeof prodData?.costPrice === 'number' ? prodData.costPrice : 0);
+        totalCogs += costSnapshot * item.quantity;
 
         verifiedLineItems.push({
           productId: item.productId,
@@ -279,8 +423,11 @@ export async function POST(request: Request) {
           quantity: item.quantity,
           unitPrice: authoritativeUnitPrice,
           subtotal: lineSubtotal,
+          costPriceSnapshot: costSnapshot,
           imei: cleanImei,
           notes: item.notes,
+          selectedOptions: item.selectedOptions,
+          selectedModifiers: item.selectedModifiers,
         });
       }
 
@@ -300,9 +447,33 @@ export async function POST(request: Request) {
         }
       }
 
+      // Validate cashier discount authorization
+      // Cashier max 10% discount, Owner/Manager unlimited
+      if (membership.role === 'cashier' && payload.discount > 0) {
+        const maxAllowedDiscount = Math.floor(authoritativeSubtotal * 0.10);
+        if (payload.discount > maxAllowedDiscount) {
+          throw new Error(`Diskon (${payload.discount.toLocaleString('id-ID')}) melebihi batas kewenangan kasir (maksimal 10% atau Rp ${maxAllowedDiscount.toLocaleString('id-ID')}). Butuh persetujuan Manajer/Owner.`);
+        }
+      }
+
+      // Derive configurable Tax and Service Charge from business profile
+      let effectiveTax = payload.tax;
+      let effectiveServiceCharge = payload.serviceCharge;
+
+      if (bizData?.businessType === 'fnb') {
+        const taxRate = bizData.taxRate !== undefined ? bizData.taxRate : 10;
+        const serviceRate = bizData.serviceChargeRate !== undefined ? bizData.serviceChargeRate : 0;
+        const taxableBase = Math.max(0, authoritativeSubtotal - payload.discount);
+        effectiveTax = Math.round((taxableBase * taxRate) / 100);
+        effectiveServiceCharge = Math.round((taxableBase * serviceRate) / 100);
+      }
+
+      // Trade-In settlement discount
+      const tradeInCredit = payload.tradeIn?.estimatedValue || 0;
+
       const authoritativeGrandTotal = Math.max(
         0, 
-        authoritativeSubtotal - payload.discount + payload.tax + payload.serviceCharge
+        authoritativeSubtotal - payload.discount + effectiveTax + effectiveServiceCharge - tradeInCredit
       );
 
       // Validate payment amount for cash sales
@@ -314,31 +485,37 @@ export async function POST(request: Request) {
         ? Math.max(0, payload.paidAmount - authoritativeGrandTotal) 
         : 0;
 
-      // Construct final authoritative Sale entity (costPrice/HPP is NEVER included in Sale document)
+      // Construct final authoritative Sale entity
       newSale = {
         id: saleId,
         saleNumber,
         businessId: payload.businessId,
         branchId: payload.branchId,
-        // Authoritative Cashier identity from verified server session
         cashierId: authUser.uid,
         cashierName: membership.displayName,
         customerName: payload.customerName,
         orderType: payload.orderType,
+        tableId: payload.tableId,
         tableNumber: payload.tableNumber,
         lineItems: verifiedLineItems,
         subtotal: authoritativeSubtotal,
         discount: payload.discount,
-        tax: payload.tax,
-        serviceCharge: payload.serviceCharge,
+        tax: effectiveTax,
+        serviceCharge: effectiveServiceCharge,
         grandTotal: authoritativeGrandTotal,
-        paidAmount: payload.paymentMethod === 'cash' ? payload.paidAmount : authoritativeGrandTotal,
+        paidAmount: payload.paymentMethod === 'cash' ? payload.paidAmount : (paymentStatus === 'paid' ? authoritativeGrandTotal : 0),
         changeAmount,
         paymentMethod: payload.paymentMethod,
         paymentStatus,
         orderStatus: (payload.orderType === 'retail_pos' || payload.orderType === 'phone_pos') ? 'served' : 'new',
         cashSessionId: payload.cashSessionId,
         idempotencyKey: effectiveIdempotencyKey,
+        cogsSnapshot: totalCogs,
+        grossProfit: authoritativeGrandTotal - totalCogs,
+        midtransOrderId,
+        transferReferenceNumber: payload.transferReferenceNumber,
+        settledAt,
+        tradeIn: payload.tradeIn,
         createdAt: now,
         updatedAt: now,
       };
@@ -373,7 +550,9 @@ export async function POST(request: Request) {
               referenceId: saleNumber,
               operatorId: authUser.uid,
               operatorName: membership.displayName,
-              notes: `Penjualan kasir pada transaksi ${saleNumber}`,
+              notes: paymentStatus === 'paid' 
+                ? `Penjualan kasir pada transaksi ${saleNumber}`
+                : `Reservasi stok penjualan pesanan pending ${saleNumber}`,
               timestamp: now,
             };
             transaction.set(movRef, movData);
@@ -381,47 +560,181 @@ export async function POST(request: Request) {
         }
       }
 
-      // 2. Update IMEI units to 'sold' and record history
+      // 2. Deduct ingredient stock according to recipe / BOM
+      for (const [ingId, qtyConsumed] of ingredientConsumptions.entries()) {
+        const ingDoc = ingredientDocsMap.get(ingId);
+        if (ingDoc && ingDoc.exists) {
+          const ingData = ingDoc.data();
+          const currentStock = ingData?.stockQty || 0;
+          const newQty = Math.max(0, currentStock - qtyConsumed);
+
+          transaction.update(ingDoc.ref, {
+            stockQty: newQty,
+            updatedAt: now,
+          });
+
+          const logRef = adminDb.collection(`businesses/${payload.businessId}/ingredientLogs`).doc();
+          transaction.set(logRef, {
+            id: logRef.id,
+            ingredientId: ingId,
+            ingredientName: ingData?.name || ingId,
+            type: 'consumption',
+            quantityDelta: -qtyConsumed,
+            previousQty: currentStock,
+            newQty,
+            referenceId: saleNumber,
+            operatorId: authUser.uid,
+            operatorName: membership.displayName,
+            timestamp: now,
+          });
+        }
+      }
+
+      // 3. Update IMEI units (Sold if paid, Reserved if pending payment)
       for (const [imei, { unitRef, unitDoc }] of imeiDocsMap.entries()) {
-        transaction.update(unitRef, {
-          status: 'sold',
-          soldAtSaleId: saleId,
-          updatedAt: now,
+        const unitData = unitDoc.data() as ImeiUnit;
+        const warrantyPeriod = unitData?.condition === 'new' ? 365 * 86400000 : 90 * 86400000;
+
+        if (paymentStatus === 'paid') {
+          transaction.update(unitRef, {
+            status: 'sold',
+            soldAtSaleId: saleId,
+            warrantyUntil: now + warrantyPeriod,
+            updatedAt: now,
+          });
+
+          const histRef = adminDb.collection(`businesses/${payload.businessId}/imeiHistory`).doc();
+          transaction.set(histRef, {
+            id: histRef.id,
+            businessId: payload.businessId,
+            imei,
+            unitId: unitDoc.id,
+            action: 'sold',
+            referenceId: saleNumber,
+            branchId: payload.branchId,
+            operatorId: authUser.uid,
+            operatorName: membership.displayName,
+            notes: `Terjual pada transaksi ${saleNumber} (Garansi aktif s/d ${new Date(now + warrantyPeriod).toLocaleDateString('id-ID')})`,
+            timestamp: now,
+          });
+        } else {
+          transaction.update(unitRef, {
+            status: 'reserved',
+            soldAtSaleId: saleId,
+            updatedAt: now,
+          });
+
+          const histRef = adminDb.collection(`businesses/${payload.businessId}/imeiHistory`).doc();
+          transaction.set(histRef, {
+            id: histRef.id,
+            businessId: payload.businessId,
+            imei,
+            unitId: unitDoc.id,
+            action: 'reserved',
+            referenceId: saleNumber,
+            branchId: payload.branchId,
+            operatorId: authUser.uid,
+            operatorName: membership.displayName,
+            notes: `Unit di-reserve untuk pesanan ${saleNumber} (Menunggu pembayaran ${payload.paymentMethod})`,
+            timestamp: now,
+          });
+        }
+      }
+
+      // 4. Record Trade-In intake if applicable
+      if (payload.tradeIn && cleanTradeInImei) {
+        const tradeInUnitId = `imei_tradein_${now}_${Math.random().toString(36).substring(2, 6)}`;
+        const tRegRef1 = adminDb.doc(`businesses/${payload.businessId}/registeredImeis/${cleanTradeInImei}`);
+        transaction.set(tRegRef1, {
+          imei: cleanTradeInImei,
+          unitId: tradeInUnitId,
+          businessId: payload.businessId,
+          branchId: payload.branchId,
+          isPrimary: true,
+          source: 'direct_sell_in',
+          registeredAt: now,
+          registeredBy: authUser.uid,
         });
 
-        const histRef = adminDb.collection(`businesses/${payload.businessId}/imeiHistory`).doc();
-        transaction.set(histRef, {
-          id: histRef.id,
+        const tUnitRef = adminDb.doc(`businesses/${payload.businessId}/imeiUnits/${tradeInUnitId}`);
+        const tUnitData: ImeiUnit = {
+          id: tradeInUnitId,
           businessId: payload.businessId,
-          imei,
-          unitId: unitDoc.id,
-          action: 'sold',
+          branchId: payload.branchId,
+          imei: cleanTradeInImei,
+          imei2: cleanTradeInImei2 || undefined,
+          productId: `prod_tradein_${cleanTradeInImei.substring(0, 8)}`,
+          productName: `Trade-In: ${payload.tradeIn.deviceModel}`,
+          brand: 'Trade-In',
+          model: payload.tradeIn.deviceModel,
+          storage: 'N/A',
+          color: 'N/A',
+          condition: (payload.tradeIn.condition as any) || 'second_grade_a',
+          costPrice: payload.tradeIn.estimatedValue,
+          sellingPrice: payload.tradeIn.estimatedValue,
+          status: 'available',
+          source: 'direct_sell_in',
+          supplierOrCustomerName: payload.tradeIn.customerName || payload.customerName || 'Pelanggan POS',
+          notes: `Unit tukar tambah pada transaksi ${saleNumber}`,
+          createdAt: now,
+          updatedAt: now,
+        };
+        transaction.set(tUnitRef, tUnitData);
+
+        const tHistRef = adminDb.collection(`businesses/${payload.businessId}/imeiHistory`).doc();
+        transaction.set(tHistRef, {
+          id: tHistRef.id,
+          businessId: payload.businessId,
+          imei: cleanTradeInImei,
+          unitId: tradeInUnitId,
+          action: 'received',
           referenceId: saleNumber,
           branchId: payload.branchId,
           operatorId: authUser.uid,
           operatorName: membership.displayName,
-          notes: `Terjual pada transaksi ${saleNumber}`,
+          notes: `Diterima melalui tukar tambah transaksi ${saleNumber}`,
           timestamp: now,
         });
       }
 
-      // 3. Save authoritative Sale document
+      // 5. Update table occupancy: release if paid, maintain if pending
+      if (tableRef && tableDoc && tableDoc.exists) {
+        if (paymentStatus === 'paid') {
+          transaction.update(tableRef, {
+            status: 'available',
+            activeSaleId: '',
+            customerName: '',
+            updatedAt: now,
+          });
+        } else {
+          transaction.update(tableRef, {
+            status: 'occupied',
+            activeSaleId: saleId,
+            customerName: payload.customerName || 'Pelanggan Dine-In',
+            updatedAt: now,
+          });
+        }
+      }
+
+      // 6. Save authoritative Sale document
       const saleRef = adminDb.doc(`businesses/${payload.businessId}/sales/${saleId}`);
       transaction.set(saleRef, cleanUndefined(newSale));
 
-      // 4. Update Cash Session if active cash sale
-      if (payload.paymentMethod === 'cash' && shiftDoc && shiftDoc.exists && shiftRef) {
+      // 7. Update Cash Session if active cash sale and settled
+      if (payload.paymentMethod === 'cash' && paymentStatus === 'paid' && shiftDoc && shiftDoc.exists && shiftRef) {
         const shiftData = shiftDoc.data();
         const currentSales = shiftData?.cashSalesTotal ?? 0;
         const currentExpected = shiftData?.expectedClosingCash ?? 0;
+        const currentDrawer = typeof shiftData?.currentCashDrawer === 'number' ? shiftData.currentCashDrawer : currentExpected;
         transaction.update(shiftRef, {
           cashSalesTotal: currentSales + authoritativeGrandTotal,
           expectedClosingCash: currentExpected + authoritativeGrandTotal,
+          currentCashDrawer: currentDrawer + authoritativeGrandTotal,
           updatedAt: now,
         });
       }
 
-      // 5. Store Idempotency Key mapping with canonical request fingerprint
+      // 8. Store Idempotency Key mapping with canonical request fingerprint
       transaction.set(idemRef, cleanUndefined({
         idempotencyKey: effectiveIdempotencyKey,
         saleId,
@@ -433,6 +746,37 @@ export async function POST(request: Request) {
         createdAt: now,
       }));
     });
+
+    // 9. Generate actual Midtrans Snap intent / token if QRIS / Midtrans
+    if (payload.paymentMethod === 'midtrans_qris' && newSale) {
+      let snapToken = `snap_sim_${saleId}`;
+      let snapRedirectUrl = `https://app.sandbox.midtrans.com/snap/v2/vtweb/${snapToken}`;
+      
+      if (midtransAdapter.isConfigured()) {
+        try {
+          const snapRes = await midtransAdapter.createSnapTransaction({
+            orderId: midtransOrderId!,
+            grossAmount: (newSale as Sale).grandTotal,
+            businessId: payload.businessId,
+            customerName: payload.customerName || "Pelanggan POS",
+          });
+          if (snapRes.token) {
+            snapToken = snapRes.token;
+            snapRedirectUrl = snapRes.redirectUrl || snapRedirectUrl;
+          }
+        } catch (e: any) {
+          console.warn("Midtrans snap creation warning:", e.message);
+        }
+      }
+
+      await adminDb.doc(`businesses/${payload.businessId}/sales/${saleId}`).update({
+        snapToken,
+        snapRedirectUrl,
+      });
+
+      (newSale as Sale).snapToken = snapToken;
+      (newSale as Sale).snapRedirectUrl = snapRedirectUrl;
+    }
 
     return NextResponse.json({
       success: true,
@@ -448,9 +792,11 @@ export async function POST(request: Request) {
       error.message?.includes('diarsipkan') ||
       error.message?.includes('Kuantitas untuk produk bernomor IMEI') ||
       error.message?.includes('duplikasi unit IMEI') ||
+      error.message?.includes('berada di cabang') ||
       error.message?.includes('tidak cocok dengan') ||
-      error.message?.includes('tidak dapat dijual di cabang') ||
+      error.message?.includes('terdaftar untuk produk') ||
       error.message?.includes('kurang dari total tagihan') ||
+      error.message?.includes('tukar tambah') ||
       error.message?.includes('Sesi kasir')
     ) {
       return NextResponse.json(
@@ -458,12 +804,14 @@ export async function POST(request: Request) {
         { status: 400 }
       );
     }
+
     if (error.message?.includes('kewenangan kasir') || error.message?.includes('persetujuan Manajer')) {
       return NextResponse.json(
         { success: false, message: error.message },
         { status: 403 }
       );
     }
+
     return handleAuthApiError(error);
   }
 }

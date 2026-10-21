@@ -57,7 +57,9 @@ export default function SellInPage() {
 
   const [successMsg, setSuccessMsg] = useState('');
 
-  const handleDirectSubmit = (e: React.FormEvent) => {
+  const [isSubmittingDirect, setIsSubmittingDirect] = useState(false);
+
+  const handleDirectSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!imei.trim() || !model.trim() || !customerName.trim()) {
       alert('IMEI 1, Model, dan Nama Pelanggan wajib diisi.');
@@ -75,31 +77,36 @@ export default function SellInPage() {
       return;
     }
 
-    const res = sellInDevice({
-      imei: val.imei1,
-      imei2: val.imei2,
-      serialNumber: val.serialNumber,
-      brand,
-      model: model.trim(),
-      storage,
-      color,
-      condition,
-      costPrice,
-      sellingPrice,
-      customerName: customerName.trim(),
-      notes,
-    });
+    setIsSubmittingDirect(true);
+    try {
+      const res = await sellInDevice({
+        imei: val.imei1,
+        imei2: val.imei2,
+        serialNumber: val.serialNumber,
+        brand,
+        model: model.trim(),
+        storage,
+        color,
+        condition,
+        costPrice,
+        sellingPrice,
+        customerName: customerName.trim(),
+        notes,
+      });
 
-    if (res.success) {
-      setSuccessMsg(`✓ Berhasil! Unit ${brand} ${model} dengan IMEI ${val.imei1}${val.imei2 ? ` & ${val.imei2}` : ''} telah didaftarkan ke inventaris toko.`);
-      setImei('');
-      setImei2('');
-      setSerialNumber('');
-      setModel('');
-      setCustomerName('');
-      setTimeout(() => setSuccessMsg(''), 5000);
-    } else {
-      alert(res.error);
+      if (res.success) {
+        setSuccessMsg(`✓ Berhasil! Unit ${brand} ${model} dengan IMEI ${val.imei1}${val.imei2 ? ` & ${val.imei2}` : ''} telah didaftarkan ke inventaris toko.`);
+        setImei('');
+        setImei2('');
+        setSerialNumber('');
+        setModel('');
+        setCustomerName('');
+        setTimeout(() => setSuccessMsg(''), 5000);
+      } else {
+        alert(res.error || 'Gagal mendaftarkan unit Sell-In.');
+      }
+    } finally {
+      setIsSubmittingDirect(false);
     }
   };
 

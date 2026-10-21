@@ -14,6 +14,7 @@ export interface CheckoutPayload {
   paymentMethod: PaymentMethod;
   orderType: OrderType;
   tableNumber?: string;
+  tableId?: string;
   customerName?: string;
   cashSessionId?: string;
   idempotencyKey?: string;
@@ -57,6 +58,8 @@ export async function executePosCheckout(
       imei: item.imei,
       selectedImei: item.imei,
       notes: item.notes,
+      selectedOptions: item.selectedOptions,
+      selectedModifiers: item.selectedModifiers,
     }));
 
     const res = await fetch("/api/sales/checkout", {
@@ -68,6 +71,7 @@ export async function executePosCheckout(
         customerName: payload.customerName,
         orderType: payload.orderType,
         tableNumber: payload.tableNumber,
+        tableId: payload.tableId,
         lineItems: formattedLineItems,
         discount: payload.discount || 0,
         tax: payload.tax || 0,

@@ -31,8 +31,13 @@ export class MidtransAdapter {
     this.isProduction = process.env.MIDTRANS_IS_PRODUCTION === "true";
   }
 
+  public getServerKey(): string {
+    return process.env.MIDTRANS_SERVER_KEY || this.serverKey || "";
+  }
+
   public isConfigured(): boolean {
-    return Boolean(this.serverKey && this.serverKey !== "SB-Mid-server-xxxxxx");
+    const key = this.getServerKey();
+    return Boolean(key && key !== "SB-Mid-server-xxxxxx");
   }
 
   public verifySignature(notification: MidtransNotificationPayload): boolean {
@@ -40,14 +45,15 @@ export class MidtransAdapter {
       return false;
     }
 
-    const rawString = `${notification.order_id}${notification.status_code}${notification.gross_amount}${this.serverKey}`;
+    const rawString = `${notification.order_id}${notification.status_code}${notification.gross_amount}${this.getServerKey()}`;
     const calculatedHash = crypto.createHash("sha512").update(rawString).digest("hex");
 
     return calculatedHash === notification.signature_key;
   }
 
   public getSnapBaseUrl(): string {
-    return this.isProduction
+    const isProd = process.env.MIDTRANS_IS_PRODUCTION === "true" || this.isProduction;
+    return isProd
       ? "https://app.midtrans.com/snap/v1/transactions"
       : "https://app.sandbox.midtrans.com/snap/v1/transactions";
   }
@@ -60,7 +66,7 @@ export class MidtransAdapter {
     }
 
     try {
-      const authHeader = Buffer.from(`${this.serverKey}:`).toString("base64");
+      const authHeader = Buffer.from(`${this.getServerKey()}:`).toString("base64");
       const res = await fetch(this.getSnapBaseUrl(), {
         method: "POST",
         headers: {

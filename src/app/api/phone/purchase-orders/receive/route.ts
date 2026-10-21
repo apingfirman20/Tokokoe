@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { adminDb } from "@/lib/firebase/admin";
-import { ImeiUnit, ImeiHistory, PurchaseOrder, StockMovement } from "@/types";
+import { ImeiUnit, ImeiHistory, PurchaseOrder, StockMovement, Product } from "@/types";
 import { 
   requireAuthenticatedUser, 
   requireBusinessPermission, 
@@ -112,6 +112,10 @@ export async function POST(request: Request) {
 
     // 4. Atomic transaction with concurrency locking on deterministic IMEI registry docs
     await adminDb.runTransaction(async (transaction) => {
+      // Prevent duplicating response array items on transaction retry
+      createdUnits.length = 0;
+      createdHistories.length = 0;
+
       // ----------------------------------------------------
       // PHASE A: ALL READS FIRST
       // ----------------------------------------------------
@@ -155,14 +159,16 @@ export async function POST(request: Request) {
         }
       }
 
-      // Read target product if available
-      const targetProductId = targetItem.productId || `prod_${targetItem.brand.toLowerCase()}`;
+      // Read target product to prevent dangling productId
+      const targetProductId = targetItem.productId || `prod_ph_${targetItem.brand.toLowerCase()}_${targetItem.model.toLowerCase().replace(/\s+/g, '_')}`;
       const prodRef = adminDb.doc(`businesses/${businessId}/products/${targetProductId}`);
       const prodDoc = await transaction.get(prodRef);
 
       // ----------------------------------------------------
       // PHASE B: ALL WRITES SECOND
       // ----------------------------------------------------
+      const productName = `${targetItem.brand} ${targetItem.model} ${targetItem.storage}`;
+
       for (const u of cleanUnits) {
         const unitId = `imei_${now}_${Math.random().toString(36).substring(2, 6)}`;
         const unitDocRef = adminDb.doc(`businesses/${businessId}/imeiUnits/${unitId}`);
@@ -203,7 +209,7 @@ export async function POST(request: Request) {
           imei2: u.imei2,
           serialNumber: u.serialNumber,
           productId: targetProductId,
-          productName: `${targetItem.brand} ${targetItem.model} ${targetItem.storage}`,
+          productName,
           brand: targetItem.brand,
           model: targetItem.model,
           storage: targetItem.storage,
@@ -212,7 +218,7 @@ export async function POST(request: Request) {
           costPrice: targetItem.costPrice,
           sellingPrice: targetItem.expectedSellingPrice,
           status: 'available',
-          warrantyUntil: now + 365 * 86400000,
+          // Warranty starts upon customer purchase sale, NOT automatically at intake receiving
           source: 'purchase_order',
           createdAt: now,
           updatedAt: now,
@@ -243,33 +249,55 @@ export async function POST(request: Request) {
         createdHistories.push(histData);
       }
 
-      // Update Product Physical Stock & Write Authoritative Stock Movement
-      if (prodDoc.exists) {
-        const currentStock = prodDoc.data()?.stockQty || 0;
+      // Update or create Product physical stock & record authoritative Stock Movement
+      let currentStock = 0;
+      if (!prodDoc.exists) {
+        const newProd: Product = {
+          id: targetProductId,
+          businessId,
+          name: productName,
+          category: 'Smartphone',
+          sellingPrice: targetItem.expectedSellingPrice,
+          costPrice: targetItem.costPrice,
+          available: true,
+          trackStock: true,
+          stockQty: cleanUnits.length,
+          brand: targetItem.brand,
+          model: targetItem.model,
+          storage: targetItem.storage,
+          color: targetItem.color,
+          condition: targetItem.condition,
+          createdAt: now,
+          updatedAt: now,
+        };
+        transaction.set(prodRef, newProd);
+        currentStock = 0;
+      } else {
+        currentStock = prodDoc.data()?.stockQty || 0;
         transaction.update(prodRef, {
           stockQty: currentStock + cleanUnits.length,
           updatedAt: now,
         });
-
-        const movRef = adminDb.collection(`businesses/${businessId}/stockMovements`).doc();
-        const movData: StockMovement = {
-          id: movRef.id,
-          businessId,
-          branchId,
-          productId: targetProductId,
-          productName: `${targetItem.brand} ${targetItem.model} ${targetItem.storage}`,
-          type: 'purchase_order',
-          quantityDelta: cleanUnits.length,
-          previousQty: currentStock,
-          newQty: currentStock + cleanUnits.length,
-          referenceId: poData.poNumber,
-          operatorId: authUser.uid,
-          operatorName: membership.displayName,
-          notes: `Penerimaan ${cleanUnits.length} unit IMEI dari PO ${poData.poNumber}`,
-          timestamp: now,
-        };
-        transaction.set(movRef, movData);
       }
+
+      const movRef = adminDb.collection(`businesses/${businessId}/stockMovements`).doc();
+      const movData: StockMovement = {
+        id: movRef.id,
+        businessId,
+        branchId,
+        productId: targetProductId,
+        productName,
+        type: 'purchase_order',
+        quantityDelta: cleanUnits.length,
+        previousQty: currentStock,
+        newQty: currentStock + cleanUnits.length,
+        referenceId: poData.poNumber,
+        operatorId: authUser.uid,
+        operatorName: membership.displayName,
+        notes: `Penerimaan ${cleanUnits.length} unit IMEI dari PO ${poData.poNumber}`,
+        timestamp: now,
+      };
+      transaction.set(movRef, movData);
 
       // Update PO item
       targetItem.quantityReceived += cleanUnits.length;

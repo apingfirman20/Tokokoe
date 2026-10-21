@@ -96,13 +96,23 @@ export function AppShell({ children }: AppShellProps) {
         </div>
         <div className="flex items-center gap-2">
           {canOpenPos && activeBusiness && (
-            <Link
-              href={`/app/${activeBusiness.id}/pos`}
-              className="flex items-center gap-1 bg-teal-600 text-white text-xs px-2.5 py-1.5 rounded-md font-semibold"
-            >
-              <CircleDollarSign className="w-4 h-4" />
-              <span>POS</span>
-            </Link>
+            pathname?.endsWith('/pos') ? (
+              <Link
+                href={`/app/${activeBusiness.id}/dashboard`}
+                className="flex items-center gap-1 bg-slate-800 text-slate-200 text-xs px-2.5 py-1.5 rounded-md font-semibold hover:text-white"
+              >
+                <Building2 className="w-4 h-4" />
+                <span>Backoffice</span>
+              </Link>
+            ) : (
+              <Link
+                href={`/app/${activeBusiness.id}/pos`}
+                className="flex items-center gap-1 bg-teal-600 text-white text-xs px-2.5 py-1.5 rounded-md font-semibold"
+              >
+                <CircleDollarSign className="w-4 h-4" />
+                <span>POS</span>
+              </Link>
+            )
           )}
         </div>
       </div>
@@ -286,15 +296,25 @@ export function AppShell({ children }: AppShellProps) {
             </div>
 
             <div className="flex items-center gap-3">
-              {/* Quick POS Trigger */}
+              {/* Quick POS or Backoffice Toggle Trigger */}
               {canOpenPos && activeBusiness && (
-                <Link
-                  href={`/app/${activeBusiness.id}/pos`}
-                  className="flex items-center gap-2 px-3.5 py-2 rounded-lg bg-teal-600 text-white hover:bg-teal-700 transition-colors shadow-sm text-sm font-semibold active:scale-[0.98]"
-                >
-                  <CircleDollarSign className="w-4 h-4" />
-                  <span className="hidden sm:inline">Buka Kasir POS</span>
-                </Link>
+                pathname?.endsWith('/pos') ? (
+                  <Link
+                    href={`/app/${activeBusiness.id}/dashboard`}
+                    className="flex items-center gap-2 px-3.5 py-2 rounded-lg bg-slate-800 text-white hover:bg-slate-700 transition-colors shadow-sm text-sm font-semibold active:scale-[0.98]"
+                  >
+                    <Building2 className="w-4 h-4" />
+                    <span className="hidden sm:inline">Kembali ke Backoffice</span>
+                  </Link>
+                ) : (
+                  <Link
+                    href={`/app/${activeBusiness.id}/pos`}
+                    className="flex items-center gap-2 px-3.5 py-2 rounded-lg bg-teal-600 text-white hover:bg-teal-700 transition-colors shadow-sm text-sm font-semibold active:scale-[0.98]"
+                  >
+                    <CircleDollarSign className="w-4 h-4" />
+                    <span className="hidden sm:inline">Buka Kasir POS</span>
+                  </Link>
+                )
               )}
 
               {/* Reset Demo Data Button (Development Only) */}

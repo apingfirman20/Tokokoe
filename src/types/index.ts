@@ -53,6 +53,8 @@ export interface Business {
   phone: string;
   enabledModules: string[];
   status: 'active' | 'suspended' | 'inactive';
+  taxRate?: number; // e.g. 10 for 10% PB1
+  serviceChargeRate?: number; // e.g. 5 for 5%
   createdAt: number;
   updatedAt: number;
 }
@@ -84,6 +86,24 @@ export interface BusinessMember {
   updatedAt?: number;
 }
 
+export interface RecipeItem {
+  ingredientId: string;
+  quantityRequired: number; // Consumption amount per portion/unit
+}
+
+export interface Ingredient {
+  id: string;
+  businessId: string;
+  branchId?: string;
+  name: string;
+  uom: string; // 'gram' | 'ml' | 'shot' | 'pcs' | 'porsi'
+  costPerUnit: number;
+  stockQty: number;
+  minStockAlert?: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface ProductOption {
   name: string;
   choices: Array<{ label: string; extraPrice: number }>;
@@ -92,6 +112,7 @@ export interface ProductOption {
 export interface ProductModifier {
   name: string;
   price: number;
+  recipe?: RecipeItem[];
 }
 
 export interface Product {
@@ -110,6 +131,7 @@ export interface Product {
   archivedAt?: number;
   trackStock: boolean;
   stockQty: number;
+  recipe?: RecipeItem[]; // Recipe / Bill of Materials (BOM)
   options?: ProductOption[];
   modifiers?: ProductModifier[];
   // Phone store specific
@@ -209,6 +231,7 @@ export interface CartLineItem {
   quantity: number;
   unitPrice: number;
   subtotal: number;
+  costPriceSnapshot?: number; // Historical protected HPP at the exact moment of sale
   notes?: string;
   imei?: string;
   selectedOptions?: Record<string, string>;
@@ -217,7 +240,7 @@ export interface CartLineItem {
 
 export type OrderType = 'dine_in' | 'takeaway' | 'delivery' | 'retail_pos' | 'phone_pos';
 export type PaymentMethod = 'cash' | 'transfer' | 'midtrans_qris';
-export type PaymentStatus = 'paid' | 'pending' | 'failed' | 'refunded';
+export type PaymentStatus = 'paid' | 'pending' | 'failed' | 'cancelled' | 'refunded';
 export type KitchenOrderStatus = 'new' | 'preparing' | 'ready' | 'served' | 'completed';
 
 export interface Sale {
@@ -230,6 +253,7 @@ export interface Sale {
   customerName?: string;
   orderType: OrderType;
   tableNumber?: string;
+  tableId?: string;
   lineItems: CartLineItem[];
   subtotal: number;
   discount: number;
@@ -243,6 +267,81 @@ export interface Sale {
   orderStatus: KitchenOrderStatus;
   cashSessionId?: string;
   idempotencyKey?: string;
+  // Historical COGS / Laba Kotor protection
+  cogsSnapshot?: number;
+  grossProfit?: number;
+  // Non-cash / Gateway lifecycle fields
+  midtransOrderId?: string;
+  midtransTransactionId?: string;
+  midtransPaymentType?: string;
+  snapToken?: string;
+  snapRedirectUrl?: string;
+  transferReferenceNumber?: string;
+  settledAt?: number;
+  cancelledAt?: number;
+  cancellationReason?: string;
+  // Refund / Void audit fields
+  refundedAt?: number;
+  refundReason?: string;
+  refundedBy?: string;
+  refundedByName?: string;
+  refundMethod?: PaymentMethod;
+  // Trade-In / Tukar Tambah
+  tradeIn?: {
+    deviceModel: string;
+    imei: string;
+    imei2?: string;
+    condition?: string;
+    estimatedValue: number;
+    customerName?: string;
+  };
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface HeldCart {
+  id: string;
+  businessId: string;
+  branchId: string;
+  customerTag?: string;
+  lineItems: CartLineItem[];
+  subtotal: number;
+  discount: number;
+  grandTotal: number;
+  createdAt: number;
+  cashierId: string;
+  cashierName: string;
+}
+
+export type ServiceTicketStatus = 'received' | 'diagnosing' | 'in_progress' | 'ready' | 'delivered' | 'cancelled';
+
+export interface ServiceSparepart {
+  productId: string;
+  productName: string;
+  quantity: number;
+  unitPrice: number;
+}
+
+export interface ServiceTicket {
+  id: string;
+  ticketNumber: string;
+  businessId: string;
+  branchId: string;
+  customerName: string;
+  customerPhone: string;
+  deviceModel: string;
+  imei?: string;
+  issueDescription: string;
+  technicianId?: string;
+  technicianName?: string;
+  status: ServiceTicketStatus;
+  laborFee: number;
+  spareparts: ServiceSparepart[];
+  totalFee: number;
+  isPaid: boolean;
+  paidAt?: number;
+  paymentMethod?: PaymentMethod;
+  notes?: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -260,6 +359,7 @@ export interface CashSession {
   cashInTotal: number;
   cashOutTotal: number;
   expectedClosingCash: number;
+  currentCashDrawer?: number;
   actualClosingCash?: number;
   discrepancy?: number;
   status: 'open' | 'closed';

@@ -32,26 +32,46 @@ export default function FinancePage() {
 
   const bizSales = sales.filter(s => s.businessId === businessId);
 
-  // Revenue calculation
-  const grossRevenue = bizSales.reduce((acc, s) => acc + s.grandTotal, 0);
+  // Revenue calculation: strictly separate paid, refunded, and pending
+  const paidSales = bizSales.filter(s => (s.paymentStatus || 'paid') === 'paid');
+  const refundedSales = bizSales.filter(s => s.paymentStatus === 'refunded');
+  
+  const grossRevenue = paidSales.reduce((acc, s) => acc + s.grandTotal, 0);
+  const refundedTotal = refundedSales.reduce((acc, s) => acc + s.grandTotal, 0);
+  const netRevenue = grossRevenue; // Net settled revenue
 
-  // Cost of Goods Sold (HPP) calculation from line items matching product cost prices
+  // Cost of Goods Sold (HPP) calculation using protected historical cost snapshots
+  // Aturan: Mengubah HPP katalog tidak boleh mengubah laba penjualan lama!
   let totalCOGS = 0;
-  for (const s of bizSales) {
-    for (const item of s.lineItems) {
-      const prod = products.find(p => p.id === item.productId);
-      const cost = prod ? prod.costPrice : Math.round(item.unitPrice * 0.5);
-      totalCOGS += cost * item.quantity;
+  for (const s of paidSales) {
+    if (typeof s.cogsSnapshot === 'number') {
+      totalCOGS += s.cogsSnapshot;
+    } else {
+      for (const item of s.lineItems) {
+        if (typeof item.costPriceSnapshot === 'number') {
+          totalCOGS += item.costPriceSnapshot * item.quantity;
+        } else {
+          const prod = products.find(p => p.id === item.productId);
+          const cost = prod?.costPrice ?? Math.round(item.unitPrice * 0.5);
+          totalCOGS += cost * item.quantity;
+        }
+      }
     }
   }
 
-  const grossProfit = grossRevenue - totalCOGS;
-  const marginPercent = grossRevenue > 0 ? Math.round((grossProfit / grossRevenue) * 100) : 0;
+  const grossProfit = netRevenue - totalCOGS;
+  const marginPercent = netRevenue > 0 ? Math.round((grossProfit / netRevenue) * 100) : 0;
 
-  // Total cash in drawer across sessions
+  // Total cash in drawer:
+  // Aturan: Hanya hitung sesi kasir yang sedang AKTIF/OPEN. Jangan menjumlah seluruh saldo shift historis!
   const totalCashDrawer = cashSessions
-    .filter((s: CashSession) => s.businessId === businessId)
-    .reduce((acc: number, s: CashSession) => acc + (s.actualClosingCash ?? s.expectedClosingCash), 0);
+    .filter((s: CashSession) => s.businessId === businessId && s.status === 'open')
+    .reduce((acc: number, s: CashSession) => {
+      const drawer = typeof s.currentCashDrawer === 'number'
+        ? s.currentCashDrawer
+        : (s.expectedClosingCash ?? s.openingCash ?? 0);
+      return acc + drawer;
+    }, 0);
 
   return (
     <div className="space-y-6">

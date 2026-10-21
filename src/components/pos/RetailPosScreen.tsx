@@ -2,13 +2,16 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { useBusiness } from '@/context/BusinessContext';
-import { Product, CartLineItem, Sale } from '@/types';
+import { Product, CartLineItem, Sale, HeldCart } from '@/types';
 import { formatRupiah } from '@/lib/utils';
 import { 
   ShoppingBag, ScanBarcode, Search, Plus, Minus, 
   Trash2, Banknote, CheckCircle2, Printer, X, Keyboard,
-  Clock, ArrowUpRight, ArrowDownLeft
+  Clock, ArrowUpRight, ArrowDownLeft, RotateCcw, AlertTriangle,
+  Coins
 } from 'lucide-react';
+import { ReceiptModal } from './ReceiptModal';
+import { playPosSound } from '@/lib/audio';
 
 export function RetailPosScreen() {
   const { 
@@ -19,7 +22,12 @@ export function RetailPosScreen() {
     activeShift,
     openShift,
     closeShift,
-    recordCashMovement
+    recordCashMovement,
+    heldCarts,
+    holdCart,
+    removeHeldCart,
+    refundSale,
+    sales,
   } = useBusiness();
 
   const [barcodeInput, setBarcodeInput] = useState('');
@@ -30,6 +38,15 @@ export function RetailPosScreen() {
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [showReceiptModal, setShowReceiptModal] = useState(false);
   const [lastSale, setLastSale] = useState<Sale | null>(null);
+
+  // Held Cart & Refund Modals
+  const [showHeldModal, setShowHeldModal] = useState(false);
+  const [holdCustomerTag, setHoldCustomerTag] = useState('');
+  const [showRefundModal, setShowRefundModal] = useState(false);
+  const [refundSaleId, setRefundSaleId] = useState('');
+  const [refundReason, setRefundReason] = useState('');
+  const [refundLoading, setRefundLoading] = useState(false);
+  const [refundMsg, setRefundMsg] = useState('');
 
   // Shift & Cash Drawer Modals
   const [showShiftModal, setShowShiftModal] = useState(false);
@@ -53,24 +70,6 @@ export function RetailPosScreen() {
     barcodeInputRef.current?.focus();
   }, [cart]);
 
-  // Keyboard shortcut listener
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'F2') {
-        e.preventDefault();
-        if (cart.length > 0) {
-          setShowPaymentModal(true);
-        }
-      } else if (e.key === 'F3') {
-        e.preventDefault();
-        barcodeInputRef.current?.focus();
-      } else if (e.key === 'Escape') {
-        setCart([]);
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [cart]);
 
   // Handle barcode submission (e.g. from physical USB laser scanner or typing)
   const handleBarcodeSubmit = (e: React.FormEvent) => {
@@ -92,29 +91,54 @@ export function RetailPosScreen() {
 
     if (found) {
       if (found.isActive === false || found.available === false) {
+        playPosSound('scan_error');
         setFeedbackMsg(`❌ Produk "${found.name}" nonaktif / diarsipkan.`);
         setTimeout(() => setFeedbackMsg(''), 3000);
         return;
       }
+      if (found.trackStock && (found.stockQty ?? 0) <= 0) {
+        playPosSound('scan_error');
+        setFeedbackMsg(`❌ Stok produk "${found.name}" habis (0 unit tersisa).`);
+        setTimeout(() => setFeedbackMsg(''), 3000);
+        return;
+      }
+      playPosSound('scan_success');
       addToCart(found);
       setBarcodeInput('');
       setFeedbackMsg(`✓ Ditambahkan: ${found.name}`);
       setTimeout(() => setFeedbackMsg(''), 2000);
+      barcodeInputRef.current?.focus();
     } else {
+      playPosSound('scan_error');
       setFeedbackMsg(`❌ Barcode / SKU "${query}" tidak ditemukan.`);
       setTimeout(() => setFeedbackMsg(''), 2500);
+      barcodeInputRef.current?.focus();
     }
   };
 
   const addToCart = (product: Product) => {
     if (product.isActive === false || product.available === false) {
+      playPosSound('scan_error');
       setFeedbackMsg(`❌ Produk "${product.name}" sedang nonaktif / diarsipkan.`);
       setTimeout(() => setFeedbackMsg(''), 2500);
       return;
     }
+    if (product.trackStock && (product.stockQty ?? 0) <= 0) {
+      playPosSound('scan_error');
+      setFeedbackMsg(`❌ Stok produk "${product.name}" habis (0 unit tersisa).`);
+      setTimeout(() => setFeedbackMsg(''), 2500);
+      return;
+    }
+    playPosSound('scan_success');
     setCart(prev => {
       const idx = prev.findIndex(item => item.productId === product.id);
       if (idx !== -1) {
+        if (product.trackStock && prev[idx].quantity + 1 > (product.stockQty ?? 0)) {
+          playPosSound('scan_error');
+          setFeedbackMsg(`⚠️ Stok produk "${product.name}" hanya tersisa ${product.stockQty} unit.`);
+          setTimeout(() => setFeedbackMsg(''), 2500);
+          return prev;
+        }
         const next = [...prev];
         next[idx].quantity += 1;
         next[idx].subtotal = next[idx].quantity * next[idx].unitPrice;
@@ -152,6 +176,31 @@ export function RetailPosScreen() {
   const grandTotal = Math.max(0, rawSubtotal - discountAmount);
   const changeAmount = Math.max(0, paidAmount - grandTotal);
 
+  // Keyboard shortcut listener (F2: Bayar, F3: Focus Barcode Scanner, Esc: Bersihkan Keranjang)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'F2') {
+        e.preventDefault();
+        if (cart.length > 0) {
+          if (!activeShift) {
+            setShiftError('Sesi kasir (shift) belum dibuka. Buka sesi shift kasir terlebih dahulu untuk transaksi tunai.');
+            setShowShiftModal(true);
+          } else {
+            setPaidAmount(grandTotal);
+            setShowPaymentModal(true);
+          }
+        }
+      } else if (e.key === 'F3') {
+        e.preventDefault();
+        barcodeInputRef.current?.focus();
+      } else if (e.key === 'Escape') {
+        setCart([]);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [cart, activeShift, grandTotal]);
+
   const [checkoutError, setCheckoutError] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
 
@@ -163,6 +212,8 @@ export function RetailPosScreen() {
       await openShift(shiftOpeningCash, shiftNotes);
       setShowShiftModal(false);
       setShiftNotes('');
+      setCheckoutError('');
+      playPosSound('key_click');
     } catch (err: any) {
       setShiftError(err.message || 'Gagal membuka shift kasir.');
     } finally {
@@ -179,6 +230,7 @@ export function RetailPosScreen() {
       setShowShiftModal(false);
       setShiftNotes('');
       setShiftActualClosingCash(0);
+      playPosSound('key_click');
     } catch (err: any) {
       setShiftError(err.message || 'Gagal menutup shift kasir.');
     } finally {
@@ -199,6 +251,7 @@ export function RetailPosScreen() {
         setShowCashMovementModal(false);
         setMovementReason('');
         setMovementAmount(50000);
+        playPosSound('key_click');
       } else {
         alert(res.error || 'Gagal mencatat mutasi kas kasir.');
       }
@@ -236,12 +289,14 @@ export function RetailPosScreen() {
       });
 
       if (res.success && res.sale) {
+        playPosSound('checkout_success');
         setLastSale(res.sale);
         setShowPaymentModal(false);
         setShowReceiptModal(true);
         setCart([]);
         setDiscountPercent(0);
       } else {
+        playPosSound('scan_error');
         setCheckoutError(res.error || 'Terjadi kesalahan transaksi.');
         alert(res.error || 'Gagal menyelesaikan transaksi.');
       }
@@ -250,6 +305,53 @@ export function RetailPosScreen() {
     }
   };
 
+  const handleHoldCart = () => {
+    if (cart.length === 0) return;
+    const tag = holdCustomerTag.trim() || `Pelanggan #${heldCarts.length + 1}`;
+    holdCart(tag, cart, rawSubtotal, discountAmount, grandTotal);
+    setCart([]);
+    setDiscountPercent(0);
+    setHoldCustomerTag('');
+    setFeedbackMsg(`✓ Keranjang "${tag}" berhasil ditahan.`);
+    setTimeout(() => setFeedbackMsg(''), 3000);
+  };
+
+  const handleResumeCart = (held: HeldCart) => {
+    setCart(held.lineItems);
+    removeHeldCart(held.id);
+    setShowHeldModal(false);
+    setFeedbackMsg(`✓ Keranjang "${held.customerTag || 'Pelanggan'}" dilanjutkan.`);
+    setTimeout(() => setFeedbackMsg(''), 3000);
+  };
+
+  const handleRefundSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!refundSaleId.trim() || !refundReason.trim()) {
+      alert("ID/Nomor transaksi dan alasan retur wajib diisi.");
+      return;
+    }
+    setRefundLoading(true);
+    setRefundMsg('');
+    try {
+      const res = await refundSale({
+        saleId: refundSaleId.trim(),
+        reason: refundReason.trim(),
+      });
+      if (res.success) {
+        setRefundMsg(`✓ Berhasil memproses retur untuk transaksi ${res.sale?.saleNumber || refundSaleId}. Stok telah dipulihkan.`);
+        setRefundSaleId('');
+        setRefundReason('');
+        setTimeout(() => {
+          setShowRefundModal(false);
+          setRefundMsg('');
+        }, 2500);
+      } else {
+        alert(res.error || "Gagal memproses retur.");
+      }
+    } finally {
+      setRefundLoading(false);
+    }
+  };
 
   return (
     <div className="flex flex-col gap-4 -m-4 md:-m-6 lg:-m-8">
@@ -281,6 +383,13 @@ export function RetailPosScreen() {
 
         {/* Shift Controls & Shortcuts */}
         <div className="flex items-center gap-2.5">
+          {activeShift && (
+            <div className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold">
+              <Coins className="w-3.5 h-3.5 text-emerald-600" />
+              <span>Laci Kas: {formatRupiah(activeShift.currentCashDrawer ?? activeShift.expectedClosingCash ?? activeShift.openingCash)}</span>
+            </div>
+          )}
+
           <button
             type="button"
             onClick={() => setShowShiftModal(true)}
@@ -305,6 +414,33 @@ export function RetailPosScreen() {
             </button>
           )}
 
+          {/* Held Cart & Refund Buttons */}
+          <button
+            type="button"
+            onClick={() => setShowHeldModal(true)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
+              heldCarts.length > 0 
+                ? 'bg-amber-50 hover:bg-amber-100 text-amber-800 border-amber-300 font-bold animate-pulse'
+                : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200'
+            }`}
+          >
+            <span>Keranjang Tertunda</span>
+            {heldCarts.length > 0 && (
+              <span className="px-1.5 py-0.2 rounded-full bg-amber-500 text-white text-[10px] font-bold">
+                {heldCarts.length}
+              </span>
+            )}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setShowRefundModal(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-200 text-xs font-semibold transition-colors"
+          >
+            <RotateCcw className="w-3.5 h-3.5 text-rose-600" />
+            <span>Retur Transaksi</span>
+          </button>
+
           {/* Keyboard Shortcuts Legend */}
           <div className="hidden sm:flex items-center gap-3 text-xs text-slate-500 bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-200">
             <div className="flex items-center gap-1">
@@ -318,12 +454,39 @@ export function RetailPosScreen() {
             </div>
             <div className="w-px h-3 bg-slate-300" />
             <div className="flex items-center gap-1">
+              <kbd className="px-1.5 py-0.5 rounded bg-slate-200 text-slate-700 font-mono text-[10px] font-bold">F4</kbd>
+              <span>Tahan</span>
+            </div>
+            <div className="w-px h-3 bg-slate-300" />
+            <div className="flex items-center gap-1">
               <kbd className="px-1.5 py-0.5 rounded bg-slate-200 text-slate-700 font-mono text-[10px] font-bold">Esc</kbd>
               <span>Batal</span>
             </div>
           </div>
         </div>
       </section>
+
+      {/* SHIFT WARNING BANNER (When shift is closed) */}
+      {!activeShift && (
+        <div className="mx-6 p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs flex flex-wrap items-center justify-between gap-3 shadow-2xs">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+            <span>
+              <strong>Shift Kasir Belum Dibuka:</strong> Transaksi tunai dan pencatatan kas laci memerlukan pembukaan shift kasir terlebih dahulu.
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setShiftError('');
+              setShowShiftModal(true);
+            }}
+            className="px-3.5 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs shadow-xs transition-colors shrink-0 active:scale-[0.98]"
+          >
+            Buka Shift Kasir Sekarang
+          </button>
+        </div>
+      )}
 
       {/* 2. MAIN STAGE */}
       <div className="grid grid-cols-12 gap-6 px-6 pb-8 items-start">
@@ -469,17 +632,33 @@ export function RetailPosScreen() {
               <span className="text-emerald-700 text-xl tabular-nums">{formatRupiah(grandTotal)}</span>
             </div>
 
-            <button
-              onClick={() => {
-                setPaidAmount(grandTotal);
-                setShowPaymentModal(true);
-              }}
-              disabled={cart.length === 0}
-              className="w-full mt-2 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm shadow-md transition-all flex items-center justify-center gap-2 disabled:opacity-40"
-            >
-              <Banknote className="w-4 h-4" />
-              <span>Bayar [F2] ({formatRupiah(grandTotal)})</span>
-            </button>
+            <div className="grid grid-cols-2 gap-2 mt-2">
+              <button
+                type="button"
+                onClick={handleHoldCart}
+                disabled={cart.length === 0}
+                className="py-3 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-800 font-bold text-xs border border-amber-200 transition-all flex items-center justify-center gap-1.5 disabled:opacity-40"
+              >
+                <span>Tahan [F4]</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!activeShift) {
+                    setShiftError('Sesi kasir (shift) belum dibuka. Buka sesi shift kasir terlebih dahulu untuk transaksi tunai.');
+                    setShowShiftModal(true);
+                  } else {
+                    setPaidAmount(grandTotal);
+                    setShowPaymentModal(true);
+                  }
+                }}
+                disabled={cart.length === 0}
+                className="py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-md transition-all flex items-center justify-center gap-1.5 disabled:opacity-40 active:scale-[0.98]"
+              >
+                <Banknote className="w-4 h-4" />
+                <span>Bayar [F2]</span>
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -554,48 +733,13 @@ export function RetailPosScreen() {
       )}
 
       {/* 4. RECEIPT MODAL */}
-      {showReceiptModal && lastSale && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl border border-slate-200 flex flex-col items-center">
-            <div className="w-full bg-slate-50 border border-dashed border-slate-300 p-5 rounded-xl font-mono text-[11px] text-slate-800 space-y-3">
-              <div className="text-center font-bold text-sm text-slate-900 uppercase">
-                {activeBusiness?.name || 'Toko Kita'}
-              </div>
-              <div className="border-t border-dashed border-slate-300 pt-2 text-[10px] text-slate-600 flex justify-between">
-                <span>{lastSale.saleNumber}</span>
-                <span>{new Date(lastSale.createdAt).toLocaleTimeString('id-ID')}</span>
-              </div>
-              <div className="border-t border-dashed border-slate-300 pt-2 space-y-1">
-                {lastSale.lineItems.map((item, idx) => (
-                  <div key={idx} className="flex justify-between">
-                    <span>{item.quantity}x {item.productName}</span>
-                    <span className="tabular-nums">{formatRupiah(item.subtotal)}</span>
-                  </div>
-                ))}
-              </div>
-              <div className="border-t border-dashed border-slate-300 pt-2 text-right font-bold text-xs">
-                <span>TOTAL: {formatRupiah(lastSale.grandTotal)}</span>
-              </div>
-            </div>
-
-            <div className="w-full flex items-center gap-2 mt-4">
-              <button
-                onClick={() => window.print()}
-                className="flex-1 py-2.5 rounded-xl bg-slate-900 text-white font-semibold text-xs flex items-center justify-center gap-1.5"
-              >
-                <Printer className="w-3.5 h-3.5" />
-                <span>Cetak Nota</span>
-              </button>
-              <button
-                onClick={() => setShowReceiptModal(false)}
-                className="py-2.5 px-4 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs"
-              >
-                Tutup
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ReceiptModal
+        isOpen={showReceiptModal && !!lastSale}
+        onClose={() => setShowReceiptModal(false)}
+        sale={lastSale}
+        businessName={activeBusiness?.name}
+        branchName={activeBranch?.name}
+      />
 
       {/* 5. SHIFT MODAL (BUKA / TUTUP SHIFT KASIR) */}
       {showShiftModal && (
@@ -841,6 +985,143 @@ export function RetailPosScreen() {
                   className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-xs disabled:opacity-50"
                 >
                   {shiftLoading ? 'Menyimpan...' : 'Catat Mutasi Kas'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* 6. HELD CARTS MODAL */}
+      {showHeldModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200">
+            <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-100">
+              <div>
+                <h3 className="font-bold text-base text-slate-900">Daftar Keranjang Tertunda</h3>
+                <p className="text-xs text-slate-500">Lanjutkan transaksi pelanggan yang sempat ditahan</p>
+              </div>
+              <button onClick={() => setShowHeldModal(false)} className="text-slate-400 hover:text-slate-700">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {heldCarts.length === 0 ? (
+              <div className="py-8 text-center text-slate-400 text-xs">
+                Tidak ada transaksi yang sedang ditahan saat ini.
+              </div>
+            ) : (
+              <div className="space-y-3 max-h-96 overflow-y-auto pr-1">
+                {heldCarts.map((held) => (
+                  <div key={held.id} className="p-3.5 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100/80 transition-all flex items-center justify-between gap-4">
+                    <div>
+                      <div className="font-bold text-xs text-slate-900 flex items-center gap-2">
+                        <span>{held.customerTag || 'Pelanggan POS'}</span>
+                        <span className="text-[10px] text-slate-400 font-normal">
+                          {new Date(held.createdAt).toLocaleTimeString('id-ID')}
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-slate-500 mt-0.5">
+                        {held.lineItems.length} produk • Total: <strong className="text-slate-800">{formatRupiah(held.grandTotal)}</strong>
+                      </div>
+                      <div className="text-[10px] text-slate-400 mt-0.5 truncate max-w-xs">
+                        {held.lineItems.map(i => `${i.quantity}x ${i.productName}`).join(', ')}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => handleResumeCart(held)}
+                        className="px-3 py-1.5 rounded-lg bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs shadow-xs"
+                      >
+                        Lanjutkan
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => removeHeldCart(held.id)}
+                        className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* 7. REFUND / RETUR MODAL */}
+      {showRefundModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200">
+            <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <RotateCcw className="w-5 h-5 text-rose-600" />
+                <h3 className="font-bold text-base text-slate-900">Retur / Refund Penjualan</h3>
+              </div>
+              <button onClick={() => { setShowRefundModal(false); setRefundMsg(''); }} className="text-slate-400 hover:text-slate-700">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {refundMsg && (
+              <div className="mb-4 p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>{refundMsg}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleRefundSubmit} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  ID atau Nomor Struk Transaksi <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={refundSaleId}
+                  onChange={(e) => setRefundSaleId(e.target.value)}
+                  placeholder="Contoh: RET-202610-1234 atau ID Transaksi"
+                  className="w-full bg-slate-50 text-xs font-mono text-slate-900 px-3.5 py-2.5 rounded-xl border border-slate-300 focus:bg-white focus:border-rose-500 outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Alasan Retur / Pengembalian <span className="text-rose-500">*</span>
+                </label>
+                <textarea
+                  required
+                  rows={2}
+                  value={refundReason}
+                  onChange={(e) => setRefundReason(e.target.value)}
+                  placeholder="Contoh: Barang rusak / cacat kemasan / salah beli"
+                  className="w-full bg-slate-50 text-xs text-slate-900 p-3 rounded-xl border border-slate-300 focus:bg-white focus:border-rose-500 outline-none resize-none"
+                />
+              </div>
+
+              <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 text-[11px] text-amber-800 space-y-1">
+                <strong>Catatan Sistem:</strong>
+                <p>Retur akan secara otomatis memulihkan stok inventaris ke stock ledger, mengurangi saldo kas drawer, dan merekam jejak audit tanpa menghapus histori transaksi asli.</p>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setShowRefundModal(false)}
+                  className="px-4 py-2 rounded-xl text-slate-600 text-xs font-semibold"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  disabled={refundLoading}
+                  className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-xs disabled:opacity-50 flex items-center gap-1.5"
+                >
+                  {refundLoading ? 'Memproses Retur...' : 'Proses Refund & Pulihkan Stok'}
                 </button>
               </div>
             </form>

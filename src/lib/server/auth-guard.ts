@@ -1,6 +1,6 @@
 import { adminAuth, adminDb } from "../firebase/admin";
 import { PermissionKey, UserRole, BusinessMember } from "../../types";
-import { hasPermission } from "../permissions";
+import { hasPermission, DEFAULT_ROLE_PERMISSIONS } from "../permissions";
 import { NextResponse } from "next/server";
 
 export class AuthError extends Error {
@@ -120,7 +120,9 @@ export async function requireBusinessMembership(businessId: string, userId: stri
   return {
     isOwner: memberData.role === 'owner',
     role: memberData.role,
-    permissions: memberData.permissions || [],
+    permissions: (memberData.permissions && memberData.permissions.length > 0)
+      ? memberData.permissions
+      : (DEFAULT_ROLE_PERMISSIONS[memberData.role] || []),
     branchIds: memberData.branchIds || [],
     displayName: memberData.displayName || memberData.username,
   };

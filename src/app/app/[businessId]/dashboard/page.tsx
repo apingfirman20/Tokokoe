@@ -14,10 +14,11 @@ export default function DashboardPage() {
   const { activeBusiness, activeBranch, sales, products, activeShift, tables, imeiUnits } = useBusiness();
   const businessId = activeBusiness?.id || 'biz_kopi_senja';
 
-  // Metrics calculation
+  // Metrics calculation: only settled paid sales count as verified revenue
   const businessSales = sales.filter(s => s.businessId === businessId);
-  const todayRevenue = businessSales.reduce((sum, s) => sum + s.grandTotal, 0);
-  const completedOrdersCount = businessSales.filter(s => s.paymentStatus === 'paid').length;
+  const paidSales = businessSales.filter(s => (s.paymentStatus || 'paid') === 'paid');
+  const todayRevenue = paidSales.reduce((sum, s) => sum + s.grandTotal, 0);
+  const completedOrdersCount = paidSales.length;
 
   const occupiedTables = tables.filter(t => t.status === 'occupied').length;
   const availableImeis = imeiUnits.filter(u => u.status === 'available').length;

@@ -86,6 +86,16 @@ export default function KitchenPage() {
                         <div className="font-bold text-slate-900">
                           {item.quantity}x {item.productName}
                         </div>
+                        {item.selectedOptions && Object.keys(item.selectedOptions).length > 0 && (
+                          <div className="text-[11px] text-teal-800 font-semibold mt-0.5">
+                            {Object.entries(item.selectedOptions).map(([k, v]) => `${k}: ${v}`).join(' • ')}
+                          </div>
+                        )}
+                        {item.selectedModifiers && item.selectedModifiers.length > 0 && (
+                          <div className="text-[11px] text-purple-800 font-semibold mt-0.5">
+                            + {item.selectedModifiers.join(', ')}
+                          </div>
+                        )}
                         {item.notes && (
                           <div className="text-[11px] text-amber-800 font-medium italic mt-0.5">
                             Catatan: {item.notes}
