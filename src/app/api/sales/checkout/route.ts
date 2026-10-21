@@ -47,7 +47,7 @@ const checkoutSchema = z.object({
   tax: z.number().int("Pajak harus berupa bilangan bulat").nonnegative("Pajak tidak boleh negatif").default(0),
   serviceCharge: z.number().int("Service charge harus berupa bilangan bulat").nonnegative("Service charge tidak boleh negatif").default(0),
   paidAmount: z.number().int("Jumlah pembayaran harus berupa bilangan bulat").nonnegative("Jumlah pembayaran tidak boleh negatif").default(0),
-  paymentMethod: z.enum(['cash', 'transfer', 'midtrans_qris']),
+  paymentMethod: z.enum(['cash', 'transfer', 'midtrans_qris', 'qris']),
   cashSessionId: z.string().optional(),
   idempotencyKey: z.string().optional(),
   tradeIn: tradeInSchema.optional(),

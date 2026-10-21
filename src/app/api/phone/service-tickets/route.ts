@@ -51,7 +51,7 @@ const settlePaymentSchema = z.object({
   branchId: z.string().min(1),
   ticketId: z.string().min(1),
   laborFee: z.number().int().nonnegative(),
-  paymentMethod: z.enum(['cash', 'transfer', 'midtrans_qris']),
+  paymentMethod: z.enum(['cash', 'transfer', 'midtrans_qris', 'qris']),
   cashSessionId: z.string().optional(),
 });
 

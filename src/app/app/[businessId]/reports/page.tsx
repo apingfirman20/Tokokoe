@@ -278,6 +278,7 @@ export default function ReportsPage() {
         >
           <option value="">Semua Metode</option>
           <option value="cash">Tunai (Cash)</option>
+          <option value="qris">QRIS (Toko Fisik)</option>
           <option value="midtrans_qris">QRIS (Midtrans)</option>
           <option value="transfer">Transfer Bank</option>
         </select>
@@ -386,7 +387,7 @@ export default function ReportsPage() {
                       </td>
                       <td className="py-3 px-4">
                         <span className="font-semibold text-slate-800 uppercase text-[11px]">
-                          {sale.paymentMethod === 'midtrans_qris' ? 'QRIS' : sale.paymentMethod}
+                          {sale.paymentMethod === 'midtrans_qris' || sale.paymentMethod === 'qris' ? 'QRIS' : sale.paymentMethod}
                         </span>
                         {sale.transferReferenceNumber && (
                           <div className="text-[9px] text-slate-400">Ref: {sale.transferReferenceNumber}</div>

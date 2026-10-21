@@ -14,7 +14,7 @@ const refundSchema = z.object({
   branchId: z.string().min(1),
   saleId: z.string().min(1),
   reason: z.string().min(3, "Alasan retur / refund wajib diisi minimal 3 karakter."),
-  refundPaymentMethod: z.enum(['cash', 'transfer', 'midtrans_qris']).optional(),
+  refundPaymentMethod: z.enum(['cash', 'transfer', 'midtrans_qris', 'qris']).optional(),
 });
 
 export async function POST(request: Request) {

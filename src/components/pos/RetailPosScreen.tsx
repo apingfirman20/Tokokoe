@@ -1023,10 +1023,19 @@ export function RetailPosScreen() {
                         type="button"
                         onClick={handleCheckoutQris}
                         disabled={isProcessing}
-                        className="flex-1 py-2.5 px-3 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs shadow-sm flex items-center justify-center gap-1.5"
+                        className="flex-1 py-2.5 px-3 rounded-xl bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white font-bold text-xs shadow-sm flex items-center justify-center gap-1.5 cursor-pointer"
                       >
-                        <CheckCircle2 className="w-4 h-4" />
-                        <span>Gunakan QRIS Fisik Toko &amp; Cetak Struk 🖨️</span>
+                        {isProcessing ? (
+                          <>
+                            <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                            <span>Menyimpan Transaksi...</span>
+                          </>
+                        ) : (
+                          <>
+                            <CheckCircle2 className="w-4 h-4" />
+                            <span>Gunakan QRIS Fisik Toko &amp; Cetak Struk 🖨️</span>
+                          </>
+                        )}
                       </button>
                       <button
                         type="button"
