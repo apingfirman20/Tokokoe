@@ -287,6 +287,7 @@ export interface Sale {
   paymentMethod: PaymentMethod;
   paymentStatus: PaymentStatus;
   orderStatus: KitchenOrderStatus;
+  notes?: string;
   cashSessionId?: string;
   idempotencyKey?: string;
   // Historical COGS / Laba Kotor protection
@@ -397,6 +398,8 @@ export interface TableItem {
   status: 'available' | 'occupied' | 'reserved';
   activeSaleId?: string;
   customerName?: string;
+  qrCodeUrl?: string;
+  lastOrderedAt?: number;
 }
 
 export interface StockAdjustment {
