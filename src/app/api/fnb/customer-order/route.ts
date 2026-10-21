@@ -143,9 +143,15 @@ export async function POST(request: Request) {
       tableNumber,
       customerName: customerName.trim(),
       grandTotal,
+      subtotal,
+      tax,
+      serviceCharge,
+      lineItems: newSale.lineItems,
+      createdAt: now,
       paymentMethod: isQris ? "qris" : "cash",
       paymentStatus: isQris ? "paid" : "pending",
       orderStatus: "waiting_cashier",
+      sale: newSale,
       message: "Pesanan berhasil dikirim ke kasir! Menunggu konfirmasi kasir sebelum diteruskan ke dapur.",
     });
   } catch (error: any) {

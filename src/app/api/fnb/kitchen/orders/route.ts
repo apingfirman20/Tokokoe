@@ -15,6 +15,7 @@ const updateKdsStatusSchema = z.object({
   saleId: z.string().min(1),
   orderStatus: z.enum(['waiting_cashier', 'new', 'preparing', 'ready', 'served', 'completed']),
   paymentStatus: z.enum(['paid', 'pending', 'failed', 'cancelled', 'refunded']).optional(),
+  paymentMethod: z.enum(['cash', 'qris', 'transfer', 'edc']).optional(),
   paidAmount: z.number().optional(),
   changeAmount: z.number().optional(),
 });
@@ -114,12 +115,17 @@ export async function PATCH(request: Request) {
 
     if (parsed.data.paymentStatus) {
       updateData.paymentStatus = parsed.data.paymentStatus;
+      if (parsed.data.paymentMethod) {
+        updateData.paymentMethod = parsed.data.paymentMethod;
+      }
       if (parsed.data.paidAmount !== undefined) {
         updateData.paidAmount = parsed.data.paidAmount;
         updateData.changeAmount = parsed.data.changeAmount !== undefined
           ? parsed.data.changeAmount
           : Math.max(0, parsed.data.paidAmount - currentSale.grandTotal);
       }
+    } else if (parsed.data.paymentMethod) {
+      updateData.paymentMethod = parsed.data.paymentMethod;
     }
 
     await saleRef.update(updateData);

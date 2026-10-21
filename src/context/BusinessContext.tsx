@@ -101,7 +101,14 @@ interface BusinessContextType {
   }) => Promise<{ success: boolean; sale?: Sale; error?: string }>;
   addItemsToFnBOrder: (saleId: string, lineItems: CartLineItem[]) => Promise<{ success: boolean; sale?: Sale; error?: string }>;
   cancelFnBOrder: (saleId: string, reason: string) => Promise<{ success: boolean; error?: string }>;
-  updateOrderStatus: (saleId: string, status: KitchenOrderStatus, paymentStatus?: PaymentStatus, paidAmount?: number, changeAmount?: number) => Promise<void>;
+  updateOrderStatus: (
+    saleId: string, 
+    status: KitchenOrderStatus, 
+    paymentStatus?: PaymentStatus, 
+    paidAmount?: number, 
+    changeAmount?: number,
+    paymentMethod?: PaymentMethod
+  ) => Promise<void>;
   requestStockAdjustment: (data: {
     productId: string;
     productName: string;
@@ -1683,7 +1690,8 @@ export function BusinessProvider({ children }: { children: React.ReactNode }) {
     status: KitchenOrderStatus, 
     paymentStatus?: PaymentStatus, 
     paidAmount?: number,
-    changeAmount?: number
+    changeAmount?: number,
+    paymentMethod?: PaymentMethod
   ) => {
     try {
       const token = await getIdToken();
@@ -1699,6 +1707,7 @@ export function BusinessProvider({ children }: { children: React.ReactNode }) {
           saleId,
           orderStatus: status,
           paymentStatus,
+          paymentMethod,
           paidAmount,
           changeAmount,
         }),
@@ -1714,6 +1723,7 @@ export function BusinessProvider({ children }: { children: React.ReactNode }) {
               ...s, 
               orderStatus: status, 
               ...(paymentStatus ? { paymentStatus } : {}),
+              ...(paymentMethod ? { paymentMethod } : {}),
               ...(paidAmount !== undefined ? { 
                 paidAmount, 
                 changeAmount: changeAmount !== undefined ? changeAmount : Math.max(0, paidAmount - s.grandTotal) 

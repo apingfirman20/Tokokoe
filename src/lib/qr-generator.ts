@@ -114,3 +114,72 @@ function drawDefaultEmblem(ctx: CanvasRenderingContext2D, x: number, y: number, 
   ctx.fillText('🍽️', x + size / 2, y + size / 2 + 1);
   ctx.restore();
 }
+
+/**
+ * Computes standard 16-bit CCITT CRC checksum (polynomial 0x1021, seed 0xFFFF)
+ * as specified by the National QRIS (EMVCo) standard.
+ */
+export function computeCrc16(str: string): string {
+  let crc = 0xffff;
+  for (let i = 0; i < str.length; i++) {
+    crc ^= str.charCodeAt(i) << 8;
+    for (let j = 0; j < 8; j++) {
+      if ((crc & 0x8000) !== 0) {
+        crc = ((crc << 1) ^ 0x1021) & 0xffff;
+      } else {
+        crc = (crc << 1) & 0xffff;
+      }
+    }
+  }
+  const hex = (crc & 0xffff).toString(16).toUpperCase();
+  return hex.padStart(4, '0');
+}
+
+/**
+ * Builds standard EMVCo Dynamic QRIS payload containing the exact transaction amount tag (Tag 54).
+ * Point of Initiation is set to 12 (Dynamic QR with generated price).
+ */
+export function buildDynamicQrisPayload(
+  amount: number,
+  merchantName: string,
+  city: string = 'JAKARTA'
+): string {
+  const cleanName = merchantName.replace(/[^a-zA-Z0-9 ]/g, '').trim().slice(0, 25) || 'TOKOKOE RESTO';
+  const nameLen = String(cleanName.length).padStart(2, '0');
+  const cleanCity = city.replace(/[^a-zA-Z0-9 ]/g, '').trim().slice(0, 15) || 'JAKARTA';
+  const cityLen = String(cleanCity.length).padStart(2, '0');
+  const amountStr = Math.max(1, Math.round(amount)).toString();
+  const amountLen = String(amountStr.length).padStart(2, '0');
+
+  const base =
+    `000201` +
+    `010212` +
+    `26680016ID.CO.TOKOKOE.WWW0118936009980000000000` +
+    `51450014ID.LINKAJA.WWW02150000000000000000303UME` +
+    `52045812` +
+    `5303360` +
+    `54${amountLen}${amountStr}` +
+    `5802ID` +
+    `59${nameLen}${cleanName}` +
+    `60${cityLen}${cleanCity}` +
+    `62070703A01` +
+    `6304`;
+
+  const crc = computeCrc16(base);
+  return `${base}${crc}`;
+}
+
+/**
+ * Generates dynamic QRIS with the exact amount embedded and the store/restaurant logo centered.
+ */
+export async function generateDynamicQrisWithLogo(
+  amount: number,
+  merchantName: string,
+  logoUrl?: string | null,
+  options: QrOptions = {}
+): Promise<{ payload: string; dataUrl: string }> {
+  const payload = buildDynamicQrisPayload(amount, merchantName);
+  const dataUrl = await generateQrWithLogo(payload, logoUrl, options);
+  return { payload, dataUrl };
+}
+

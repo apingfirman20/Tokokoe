@@ -8,8 +8,9 @@ import {
   CheckCircle2, Clock, ChefHat, Sparkles, AlertCircle, 
   X, ChevronRight, MessageSquare, ArrowLeft, RefreshCw,
   Store, MapPin, Phone, HelpCircle, Banknote, QrCode as QrCodeIcon,
-  BellRing, Smartphone, ShieldCheck
+  BellRing, Smartphone, ShieldCheck, Printer, Download
 } from 'lucide-react';
+import { generateDynamicQrisWithLogo } from '@/lib/qr-generator';
 
 interface PublicBusiness {
   id: string;
@@ -94,6 +95,7 @@ function CustomerOrderContent({ params }: { params: Promise<{ businessId: string
   const [showQrisModal, setShowQrisModal] = useState(false);
   const [qrisDataUrl, setQrisDataUrl] = useState<string>('');
   const [isGeneratingQris, setIsGeneratingQris] = useState(false);
+  const [showDigitalReceipt, setShowDigitalReceipt] = useState(false);
 
   // 1. Fetch public restaurant menu
   useEffect(() => {
@@ -145,14 +147,19 @@ function CustomerOrderContent({ params }: { params: Promise<{ businessId: string
         const data = await res.json();
         if (data.success && data.sale) {
           setOrderStatus(data.sale.orderStatus);
-          if (data.sale.paymentStatus || data.sale.paymentMethod) {
-            setSubmittedOrder((prev: any) => ({
-              ...prev,
-              paymentStatus: data.sale.paymentStatus,
-              paymentMethod: data.sale.paymentMethod || prev?.paymentMethod,
-              orderStatus: data.sale.orderStatus,
-            }));
-          }
+          setSubmittedOrder((prev: any) => ({
+            ...prev,
+            ...data.sale,
+            saleId: data.sale.id || prev?.saleId,
+            lineItems: data.sale.lineItems || prev?.lineItems,
+            subtotal: data.sale.subtotal ?? prev?.subtotal,
+            tax: data.sale.tax ?? prev?.tax,
+            serviceCharge: data.sale.serviceCharge ?? prev?.serviceCharge,
+            grandTotal: data.sale.grandTotal ?? prev?.grandTotal,
+            paymentStatus: data.sale.paymentStatus || prev?.paymentStatus,
+            paymentMethod: data.sale.paymentMethod || prev?.paymentMethod,
+            orderStatus: data.sale.orderStatus || prev?.orderStatus,
+          }));
         }
       } catch (e) {
         // silent polling catch
@@ -196,22 +203,19 @@ function CustomerOrderContent({ params }: { params: Promise<{ businessId: string
   const serviceCharge = business && business.serviceChargeRate ? Math.round((subtotal * business.serviceChargeRate) / 100) : 0;
   const grandTotal = subtotal + tax + serviceCharge;
 
-  // Generate dynamic QRIS code for payment
+  // Generate dynamic QRIS code for payment with restaurant logo
   const handleOpenQrisModal = async () => {
     setIsGeneratingQris(true);
     setShowQrisModal(true);
     try {
-      const bizName = (business?.name || 'Tokokoe Resto').slice(0, 20);
-      const payload = `00020101021226680016ID.CO.TOKOKOE.WWW0118936009980000000000520458125303360540${grandTotal}5802ID59${String(bizName.length).padStart(2, '0')}${bizName}6007JAKARTA62070703A016304`;
-      const url = await QRCode.toDataURL(payload, {
-        width: 320,
-        margin: 2,
-        color: { dark: '#0f172a', light: '#ffffff' },
-        errorCorrectionLevel: 'M',
-      });
-      setQrisDataUrl(url);
+      const { dataUrl } = await generateDynamicQrisWithLogo(
+        grandTotal,
+        business?.name || 'Tokokoe Resto',
+        business?.logoUrl
+      );
+      setQrisDataUrl(dataUrl);
     } catch (e) {
-      console.error('Error generating QRIS payload:', e);
+      console.error('Error generating dynamic QRIS payload:', e);
     } finally {
       setIsGeneratingQris(false);
     }
@@ -508,6 +512,43 @@ function CustomerOrderContent({ params }: { params: Promise<{ businessId: string
             </div>
           </div>
 
+          {/* QRIS / Table Digital Receipt CTA */}
+          <div className="space-y-2 pt-1">
+            {submittedOrder.paymentMethod === 'qris' ? (
+              <div className="p-3.5 rounded-2xl bg-gradient-to-br from-emerald-500/10 via-teal-500/10 to-emerald-500/10 border border-emerald-300 text-left space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5 text-xs font-black text-emerald-900">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                    <span>Uang Masuk ke QR (Lunas)</span>
+                  </div>
+                  <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full border border-emerald-200">
+                    LUNAS QRIS
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-600 leading-relaxed">
+                  Pembayaran Anda telah sukses tercatat di kasir. Anda dapat langsung melihat atau mencetak struk nota resmi meja sekarang.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setShowDigitalReceipt(true)}
+                  className="w-full py-2.5 px-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-xs shadow-md transition-all flex items-center justify-center gap-2 active:scale-98"
+                >
+                  <Printer className="w-4 h-4 text-teal-400" />
+                  <span>Lihat &amp; Cetak Struk Nota Digital 🧾</span>
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setShowDigitalReceipt(true)}
+                className="w-full py-2.5 px-3 rounded-xl bg-white hover:bg-slate-50 text-slate-800 font-bold text-xs border border-slate-300 transition-all flex items-center justify-center gap-2 shadow-xs"
+              >
+                <Printer className="w-4 h-4 text-slate-600" />
+                <span>Lihat &amp; Cetak Struk Pesanan Meja 🧾</span>
+              </button>
+            )}
+          </div>
+
           <div className="space-y-2 pt-2">
             <button
               onClick={() => setSubmittedOrder(null)}
@@ -521,6 +562,158 @@ function CustomerOrderContent({ params }: { params: Promise<{ businessId: string
             </p>
           </div>
         </div>
+
+        {/* DIGITAL RECEIPT MODAL FOR TABLE CUSTOMER */}
+        {showDigitalReceipt && (
+          <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-xs z-70 flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+            <div className="bg-white rounded-3xl max-w-sm w-full p-5 shadow-2xl border border-slate-200 space-y-4 text-center animate-in zoom-in-95 my-auto">
+              <div className="flex items-center justify-between pb-2 border-b border-slate-100 no-print">
+                <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                  <Printer className="w-4 h-4 text-teal-600" />
+                  <span>Struk Nota Digital Meja</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setShowDigitalReceipt(false)}
+                  className="w-7 h-7 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Printable Slip Container */}
+              <div id="customer-digital-receipt" className="bg-white p-4 rounded-2xl border border-slate-200 text-left font-mono text-xs text-slate-900 space-y-3">
+                {/* Store Header */}
+                <div className="text-center space-y-1">
+                  {business.logoUrl ? (
+                    <img
+                      src={business.logoUrl}
+                      alt={business.name}
+                      className="w-12 h-12 object-contain mx-auto rounded-xl filter grayscale contrast-125 mb-1"
+                    />
+                  ) : (
+                    <div className="w-10 h-10 rounded-xl bg-teal-600 text-white font-bold flex items-center justify-center mx-auto mb-1 text-base">
+                      🍽️
+                    </div>
+                  )}
+                  <div className="font-extrabold text-sm uppercase tracking-wider">{business.name}</div>
+                  {business.tagline && <div className="text-[10px] italic text-slate-500 font-sans">{business.tagline}</div>}
+                  {business.address && <div className="text-[9.5px] text-slate-500 font-sans">{business.address}</div>}
+                  {business.phone && <div className="text-[9.5px] text-slate-500 font-sans">Telp: {business.phone}</div>}
+                </div>
+
+                <div className="border-t border-dashed border-slate-300" />
+
+                {/* Receipt Metadata */}
+                <div className="text-[10.5px] space-y-0.5">
+                  <div className="flex justify-between">
+                    <span className="text-slate-500 font-sans">No. Nota:</span>
+                    <span className="font-bold">{submittedOrder.saleNumber}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500 font-sans">Nomor Meja:</span>
+                    <span className="font-bold">{submittedOrder.tableNumber}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500 font-sans">Nama Tamu:</span>
+                    <span className="font-bold">{submittedOrder.customerName}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500 font-sans">Waktu:</span>
+                    <span>{new Date(submittedOrder.createdAt || Date.now()).toLocaleDateString('id-ID')} {new Date(submittedOrder.createdAt || Date.now()).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500 font-sans">Metode Bayar:</span>
+                    <span className="font-bold uppercase">{submittedOrder.paymentMethod === 'qris' ? 'QRIS Digital' : 'Bayar Kasir'}</span>
+                  </div>
+                </div>
+
+                <div className="border-t border-dashed border-slate-300" />
+
+                {/* Line Items */}
+                <div className="space-y-1.5 text-[11px]">
+                  {(submittedOrder.lineItems || []).map((item: any, idx: number) => (
+                    <div key={idx} className="space-y-0.5">
+                      <div className="font-bold text-slate-900">{item.productName}</div>
+                      <div className="flex justify-between text-slate-600 pl-1">
+                        <span>{item.quantity} x Rp {Number(item.unitPrice || 0).toLocaleString('id-ID')}</span>
+                        <span className="font-bold text-slate-900">Rp {Number(item.subtotal || 0).toLocaleString('id-ID')}</span>
+                      </div>
+                      {item.notes && (
+                        <div className="text-[9.5px] text-amber-800 italic pl-1 font-sans">
+                          Catatan: {item.notes}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+
+                <div className="border-t border-dashed border-slate-300" />
+
+                {/* Calculation Breakdown */}
+                <div className="space-y-1 text-[11px]">
+                  <div className="flex justify-between text-slate-600 font-sans">
+                    <span>Subtotal:</span>
+                    <span className="font-mono">Rp {Number(submittedOrder.subtotal || submittedOrder.grandTotal || 0).toLocaleString('id-ID')}</span>
+                  </div>
+                  {Number(submittedOrder.serviceCharge || 0) > 0 && (
+                    <div className="flex justify-between text-slate-600 font-sans">
+                      <span>Biaya Layanan:</span>
+                      <span className="font-mono">Rp {Number(submittedOrder.serviceCharge).toLocaleString('id-ID')}</span>
+                    </div>
+                  )}
+                  {Number(submittedOrder.tax || 0) > 0 && (
+                    <div className="flex justify-between text-slate-600 font-sans">
+                      <span>Pajak Resto (PB1):</span>
+                      <span className="font-mono">Rp {Number(submittedOrder.tax).toLocaleString('id-ID')}</span>
+                    </div>
+                  )}
+                  <div className="border-t border-slate-900 pt-1 flex justify-between font-extrabold text-xs text-slate-900 font-sans">
+                    <span>TOTAL:</span>
+                    <span className="font-mono text-sm">Rp {Number(submittedOrder.grandTotal || 0).toLocaleString('id-ID')}</span>
+                  </div>
+                </div>
+
+                <div className="border-t border-dashed border-slate-300" />
+
+                {/* QRIS / Paid Stamp */}
+                <div className="text-center py-1">
+                  <div className={`inline-block border-2 px-3 py-1 rounded-lg font-black text-xs uppercase tracking-widest font-sans ${
+                    submittedOrder.paymentMethod === 'qris' || submittedOrder.paymentStatus === 'paid'
+                      ? 'border-emerald-600 text-emerald-700 bg-emerald-50'
+                      : 'border-amber-600 text-amber-700 bg-amber-50'
+                  }`}>
+                    {submittedOrder.paymentMethod === 'qris' || submittedOrder.paymentStatus === 'paid'
+                      ? '✓ LUNAS VIA QRIS'
+                      : 'MENUNGGU PEMBAYARAN KASIR'}
+                  </div>
+                  <p className="text-[9.5px] text-slate-500 mt-2 font-sans">
+                    {business.footerMessage || 'Terima kasih atas kunjungan Anda! Selamat menikmati hidangan.'}
+                  </p>
+                </div>
+              </div>
+
+              {/* Action Buttons (Hidden when printing) */}
+              <div className="space-y-2 no-print">
+                <button
+                  type="button"
+                  onClick={() => window.print()}
+                  className="w-full py-3 rounded-2xl bg-teal-600 hover:bg-teal-700 text-white font-extrabold text-xs shadow-md transition-all flex items-center justify-center gap-2 active:scale-98"
+                >
+                  <Printer className="w-4 h-4" />
+                  <span>Cetak Struk / Simpan PDF 🖨️</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowDigitalReceipt(false)}
+                  className="w-full py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs transition-colors"
+                >
+                  Tutup Nota
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -1011,12 +1204,18 @@ function CustomerOrderContent({ params }: { params: Promise<{ businessId: string
               </div>
             </div>
 
-            {/* Total Amount to Pay */}
-            <div className="p-2.5 rounded-xl bg-teal-50 border border-teal-200">
-              <div className="text-[11px] text-teal-700 font-medium">Total Pembayaran QRIS:</div>
-              <div className="text-xl font-extrabold text-teal-900">
+            {/* Total Amount to Pay - Generate Harga Otomatis */}
+            <div className="p-3 rounded-2xl bg-teal-50 border border-teal-200 text-center">
+              <div className="flex items-center justify-center gap-1.5 text-[11px] font-bold text-teal-800">
+                <Sparkles className="w-3.5 h-3.5 text-teal-600" />
+                <span>Nominal Terisi Otomatis di QR (Tag 54):</span>
+              </div>
+              <div className="text-2xl font-black text-teal-950 mt-0.5 tabular-nums">
                 Rp {grandTotal.toLocaleString('id-ID')}
               </div>
+              <p className="text-[10px] text-teal-700 mt-0.5">
+                Tinggal scan, nominal harga langsung muncul di aplikasi perbankan / e-wallet Anda
+              </p>
             </div>
 
             {/* Supported Payment Providers */}
@@ -1064,6 +1263,33 @@ function CustomerOrderContent({ params }: { params: Promise<{ businessId: string
           </div>
         </div>
       )}
+
+      {/* CSS for clean thermal receipt printing */}
+      <style>{`
+        @media print {
+          body * {
+            visibility: hidden !important;
+          }
+          #customer-digital-receipt, #customer-digital-receipt * {
+            visibility: visible !important;
+          }
+          #customer-digital-receipt {
+            position: fixed !important;
+            left: 0 !important;
+            top: 0 !important;
+            width: 100% !important;
+            max-width: 80mm !important;
+            margin: 0 auto !important;
+            padding: 10px !important;
+            border: none !important;
+            box-shadow: none !important;
+            z-index: 999999 !important;
+          }
+          .no-print {
+            display: none !important;
+          }
+        }
+      `}</style>
     </div>
   );
 }
