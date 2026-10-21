@@ -5,26 +5,18 @@ import { useBusiness } from '@/context/BusinessContext';
 import { Branch, ReceiptSettings } from '@/types';
 import { processReceiptLogoFile } from '@/lib/utils';
 import { 
+  getDefaultReceiptSettings, 
+  getIndustryReceiptBadge, 
+  getIndustrySampleReceipt, 
+  PRESET_LOGOS 
+} from '@/lib/receipt-presets';
+import { 
   Building2, MapPin, Plus, Check, Edit2, Archive, 
   CreditCard, AlertCircle, Save, Loader2, CheckCircle2,
   Receipt, Image as ImageIcon, SlidersHorizontal, Printer,
-  Store, Sparkles, X, Upload, Link2
+  Store, Sparkles, X, Upload, Link2, RotateCcw,
+  Coffee, Smartphone, ShoppingCart
 } from 'lucide-react';
-
-const PRESET_LOGOS = [
-  {
-    name: '☕ Kafe & FnB',
-    url: 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="130" height="38" viewBox="0 0 130 38"><rect width="130" height="38" rx="6" fill="%23111827"/><path d="M22 13h14v8a6 6 0 0 1-6 6h-2a6 6 0 0 1-6-6v-8zm14 2h4a3 3 0 0 1 3 3v2a3 3 0 0 1-3 3h-4v-8z" fill="%23ffffff"/><text x="48" y="24" fill="%23ffffff" font-family="monospace" font-weight="bold" font-size="13">CAFE POS</text></svg>'
-  },
-  {
-    name: '📱 Gadget Store',
-    url: 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="130" height="38" viewBox="0 0 130 38"><rect width="130" height="38" rx="6" fill="%230f172a"/><rect x="20" y="9" width="13" height="21" rx="2.5" fill="none" stroke="%23ffffff" stroke-width="2"/><circle cx="26.5" cy="25.5" r="1.5" fill="%23ffffff"/><text x="42" y="24" fill="%23ffffff" font-family="monospace" font-weight="bold" font-size="12">GADGET ID</text></svg>'
-  },
-  {
-    name: '🛒 Retail Mart',
-    url: 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="130" height="38" viewBox="0 0 130 38"><rect width="130" height="38" rx="6" fill="%231e293b"/><path d="M18 12h4l3 11h10l3-8H24" fill="none" stroke="%23ffffff" stroke-width="2" stroke-linecap="round"/><circle cx="26" cy="27" r="2" fill="%23ffffff"/><circle cx="34" cy="27" r="2" fill="%23ffffff"/><text x="44" y="24" fill="%23ffffff" font-family="monospace" font-weight="bold" font-size="13">MART POS</text></svg>'
-  }
-];
 
 export default function SettingsPage() {
   const { 
@@ -38,24 +30,16 @@ export default function SettingsPage() {
     updateBusinessProfile 
   } = useBusiness();
 
+  const businessType = activeBusiness?.businessType || 'retail';
+  const industryBadge = getIndustryReceiptBadge(businessType);
+
   const [businessName, setBusinessName] = useState(activeBusiness?.name || '');
   const [address, setAddress] = useState(activeBusiness?.address || '');
   const [phone, setPhone] = useState(activeBusiness?.phone || '');
 
-  // Receipt Settings State
-  const [receiptSettings, setReceiptSettings] = useState<ReceiptSettings>({
-    showLogo: true,
-    logoUrl: '',
-    storeName: activeBusiness?.name || '',
-    tagline: '',
-    address: activeBusiness?.address || '',
-    phone: activeBusiness?.phone || '',
-    footerMessage: 'Terima kasih atas kepercayaan Anda!',
-    footerNotes: 'Barang yang telah dibeli sesuai syarat garansi resmi.',
-    showCashier: true,
-    showCustomer: true,
-    showTax: true,
-    paperSize: '80mm',
+  // Receipt Settings State - initialized specialized per business type
+  const [receiptSettings, setReceiptSettings] = useState<ReceiptSettings>(() => {
+    return getDefaultReceiptSettings(activeBusiness, activeBranch);
   });
   const [isSavingReceipt, setIsSavingReceipt] = useState(false);
   const [receiptFeedback, setReceiptFeedback] = useState<string | null>(null);
@@ -63,13 +47,14 @@ export default function SettingsPage() {
   const [isUploadingReceiptLogo, setIsUploadingReceiptLogo] = useState(false);
   const [showReceiptUrlInput, setShowReceiptUrlInput] = useState(false);
 
-  // Synchronize state when activeBusiness changes
+  // Synchronize state when activeBusiness or activeBranch changes
   useEffect(() => {
     if (activeBusiness) {
       setBusinessName(activeBusiness.name || '');
       setAddress(activeBusiness.address || '');
       setPhone(activeBusiness.phone || '');
 
+      const defaults = getDefaultReceiptSettings(activeBusiness, activeBranch);
       const s = activeBusiness.receiptSettings;
       const storageKey = `tokokoe_receipt_${activeBusiness.id}`;
       let local: ReceiptSettings | null = null;
@@ -81,21 +66,25 @@ export default function SettingsPage() {
       }
 
       setReceiptSettings({
-        showLogo: s?.showLogo ?? local?.showLogo ?? (!!activeBusiness.logoUrl),
-        logoUrl: s?.logoUrl || local?.logoUrl || activeBusiness.logoUrl || '',
-        storeName: s?.storeName || local?.storeName || activeBusiness.name || '',
-        tagline: s?.tagline || local?.tagline || '',
-        address: s?.address || local?.address || activeBusiness.address || '',
-        phone: s?.phone || local?.phone || activeBusiness.phone || '',
-        footerMessage: s?.footerMessage || local?.footerMessage || 'Terima kasih atas kepercayaan Anda!',
-        footerNotes: s?.footerNotes || local?.footerNotes || 'Barang yang telah dibeli sesuai syarat garansi resmi.',
-        showCashier: s?.showCashier ?? local?.showCashier ?? true,
-        showCustomer: s?.showCustomer ?? local?.showCustomer ?? true,
-        showTax: s?.showTax ?? local?.showTax ?? true,
-        paperSize: s?.paperSize || local?.paperSize || '80mm',
+        showLogo: s?.showLogo ?? local?.showLogo ?? defaults.showLogo,
+        logoUrl: s?.logoUrl || local?.logoUrl || activeBusiness.logoUrl || defaults.logoUrl || '',
+        storeName: s?.storeName || local?.storeName || activeBusiness.name || defaults.storeName,
+        tagline: s?.tagline ?? local?.tagline ?? defaults.tagline,
+        address: s?.address || local?.address || activeBranch?.address || activeBusiness.address || defaults.address,
+        phone: s?.phone || local?.phone || activeBranch?.phone || activeBusiness.phone || defaults.phone,
+        footerMessage: s?.footerMessage || local?.footerMessage || defaults.footerMessage,
+        footerNotes: s?.footerNotes || local?.footerNotes || defaults.footerNotes,
+        customHeaderNote: s?.customHeaderNote || local?.customHeaderNote || defaults.customHeaderNote,
+        showCashier: s?.showCashier ?? local?.showCashier ?? defaults.showCashier,
+        showCustomer: s?.showCustomer ?? local?.showCustomer ?? defaults.showCustomer,
+        showTableOrService: s?.showTableOrService ?? local?.showTableOrService ?? defaults.showTableOrService,
+        showImeiDetails: s?.showImeiDetails ?? local?.showImeiDetails ?? defaults.showImeiDetails,
+        showItemBarcode: s?.showItemBarcode ?? local?.showItemBarcode ?? defaults.showItemBarcode,
+        showTax: s?.showTax ?? local?.showTax ?? defaults.showTax,
+        paperSize: s?.paperSize || local?.paperSize || defaults.paperSize || '80mm',
       });
     }
-  }, [activeBusiness]);
+  }, [activeBusiness, activeBranch]);
 
   const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [profileFeedback, setProfileFeedback] = useState<string | null>(null);
@@ -199,6 +188,17 @@ export default function SettingsPage() {
     } finally {
       setIsSavingReceipt(false);
     }
+  };
+
+  const handleResetToIndustryDefault = () => {
+    if (!confirm(`Reset pengaturan struk kembali ke standar bawaan ${industryBadge.badgeText}?`)) return;
+    const defs = getDefaultReceiptSettings(activeBusiness, activeBranch);
+    setReceiptSettings(defs);
+    if (activeBusiness) {
+      localStorage.setItem(`tokokoe_receipt_${activeBusiness.id}`, JSON.stringify(defs));
+    }
+    setReceiptFeedback(`✓ Pengaturan struk berhasil direset ke format standar khusus ${industryBadge.badgeText}.`);
+    setTimeout(() => setReceiptFeedback(null), 4000);
   };
 
   const handleAddBranch = async (e: React.FormEvent) => {
@@ -368,20 +368,38 @@ export default function SettingsPage() {
 
       {/* 2. Pengaturan Nota & Desain Struk Kasir */}
       <form onSubmit={handleSaveReceiptSettings} className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-xs space-y-5">
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
+        {/* Header Section 2 */}
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3">
           <div>
-            <h2 className="font-bold text-sm text-slate-900 flex items-center gap-2">
-              <Receipt className="w-4 h-4 text-teal-600" />
-              <span>Desain & Pengaturan Nota Kasir (Thermal Receipt)</span>
-            </h2>
-            <p className="text-xs text-slate-500 mt-0.5">
-              Sesuaikan logo toko, alamat, telepon WhatsApp, dan catatan kaki struk thermal
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="font-bold text-sm text-slate-900 flex items-center gap-2">
+                <Receipt className="w-4 h-4 text-teal-600" />
+                <span>Desain & Pengaturan Nota Kasir (Thermal Receipt)</span>
+              </h2>
+              <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full border ${industryBadge.colorClass}`}>
+                {industryBadge.badgeText}
+              </span>
+            </div>
+            <p className="text-xs text-slate-500 mt-1">
+              {industryBadge.label} — {industryBadge.featuresText}
             </p>
           </div>
-          <span className="text-[11px] font-semibold text-teal-700 bg-teal-50 border border-teal-200 px-2.5 py-1 rounded-lg flex items-center gap-1.5">
-            <Sparkles className="w-3.5 h-3.5 text-teal-600" />
-            <span>Kustomisasi Bebas</span>
-          </span>
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleResetToIndustryDefault}
+              className="text-xs font-semibold text-slate-600 hover:text-teal-700 bg-slate-100 hover:bg-teal-50 border border-slate-200 hover:border-teal-300 px-3 py-1.5 rounded-xl transition-all flex items-center gap-1.5 active:scale-95 shadow-2xs"
+              title="Reset ke format bawaan industri ini"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span>Reset Standar {industryBadge.badgeText.replace(/^[^\s]+\s/, '')}</span>
+            </button>
+            <span className="text-[11px] font-semibold text-teal-700 bg-teal-50 border border-teal-200 px-2.5 py-1.5 rounded-xl flex items-center gap-1.5">
+              <Sparkles className="w-3.5 h-3.5 text-teal-600" />
+              <span>Khusus {activeBusiness?.name || 'Bisnis Ini'}</span>
+            </span>
+          </div>
         </div>
 
         {receiptFeedback && (
@@ -454,7 +472,7 @@ export default function SettingsPage() {
                         </div>
                         <div className="space-y-0.5">
                           <div className="text-xs font-bold text-slate-800">Logo Struk Aktif</div>
-                          <div className="text-[10px] text-slate-500">Gambar disimpan langsung dalam profil usaha</div>
+                          <div className="text-[10px] text-slate-500">Khusus disimpan untuk bisnis {activeBusiness?.name}</div>
                         </div>
                       </div>
                       <button
@@ -471,15 +489,19 @@ export default function SettingsPage() {
                   <div className="space-y-2 pt-1 border-t border-slate-200/60">
                     <div className="flex flex-wrap items-center justify-between gap-2 text-[11px]">
                       <div className="flex flex-wrap items-center gap-1.5">
-                        <span className="text-slate-500 font-medium">Atau Contoh Logo Siap Pakai:</span>
+                        <span className="text-slate-500 font-medium">Contoh Logo Industri:</span>
                         {PRESET_LOGOS.map((preset, idx) => (
                           <button
                             key={idx}
                             type="button"
                             onClick={() => setReceiptSettings({ ...receiptSettings, logoUrl: preset.url, showLogo: true })}
-                            className="px-2.5 py-1 rounded-lg bg-white hover:bg-teal-50 hover:text-teal-700 text-slate-700 border border-slate-200 font-semibold text-[11px] shadow-2xs transition-all"
+                            className={`px-2.5 py-1 rounded-lg border font-semibold text-[11px] shadow-2xs transition-all ${
+                              preset.type === businessType
+                                ? 'bg-teal-50 border-teal-300 text-teal-800 font-bold'
+                                : 'bg-white hover:bg-slate-50 text-slate-700 border-slate-200'
+                            }`}
                           >
-                            {preset.name}
+                            {preset.name} {preset.type === businessType ? '★ Cocok' : ''}
                           </button>
                         ))}
                       </div>
@@ -563,6 +585,26 @@ export default function SettingsPage() {
                   className="w-full text-xs p-2.5 rounded-xl border border-slate-300 outline-none focus:border-teal-500"
                 />
               </div>
+
+              <div className="sm:col-span-2">
+                <label className="block text-xs font-semibold text-slate-700 mb-1 flex items-center justify-between">
+                  <span>Catatan Header / Tipe Nota</span>
+                  <span className="text-[10px] text-slate-400 font-normal">Muncul di bawah kontak toko</span>
+                </label>
+                <input
+                  type="text"
+                  value={receiptSettings.customHeaderNote || ''}
+                  onChange={(e) => setReceiptSettings({ ...receiptSettings, customHeaderNote: e.target.value })}
+                  placeholder={
+                    businessType === 'fnb' 
+                      ? 'Contoh: BILL MEJA & DINE IN' 
+                      : businessType === 'phone' 
+                        ? 'Contoh: NOTA ELEKTRONIK & GARANSI RESMI' 
+                        : 'Contoh: STRUK BELANJA KASIR RESMI'
+                  }
+                  className="w-full text-xs p-2.5 rounded-xl border border-slate-300 outline-none focus:border-teal-500"
+                />
+              </div>
             </div>
 
             {/* Footer & Garansi */}
@@ -581,50 +623,98 @@ export default function SettingsPage() {
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Syarat Garansi / Catatan Tambahan Nota
+                <label className="block text-xs font-semibold text-slate-700 mb-1 flex items-center justify-between">
+                  <span>Syarat Garansi / Catatan Kaki Nota</span>
+                  <span className="text-[10px] text-slate-400 font-normal">Mendukung multi-baris enter</span>
                 </label>
                 <textarea
                   rows={2}
                   value={receiptSettings.footerNotes || ''}
                   onChange={(e) => setReceiptSettings({ ...receiptSettings, footerNotes: e.target.value })}
-                  placeholder="Contoh: Simpan nota ini sebagai bukti garansi resmi toko 1 bulan."
-                  className="w-full text-xs p-2.5 rounded-xl border border-slate-300 outline-none focus:border-teal-500"
+                  placeholder={
+                    businessType === 'phone'
+                      ? 'Klaim garansi wajib menunjukkan nota ini dan segel mesin utuh.'
+                      : businessType === 'fnb'
+                        ? 'Wifi: Tokokoe-Guest | Password: kopienak123'
+                        : 'Barang yang telah dibeli tidak dapat ditukar/dikembalikan kecuali cacat pabrik.'
+                  }
+                  className="w-full text-xs p-2.5 rounded-xl border border-slate-300 outline-none focus:border-teal-500 font-mono"
                 />
               </div>
             </div>
 
             {/* Print Options */}
-            <div className="flex flex-wrap items-center gap-4 bg-slate-50 p-3 rounded-xl border border-slate-200 text-xs">
-              <label className="flex items-center gap-1.5 text-slate-700 font-semibold cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={receiptSettings.showCashier ?? true}
-                  onChange={(e) => setReceiptSettings({ ...receiptSettings, showCashier: e.target.checked })}
-                  className="rounded text-teal-600 focus:ring-teal-500"
-                />
-                <span>Tampilkan Kasir</span>
-              </label>
+            <div className="space-y-2 bg-slate-50 p-3 rounded-xl border border-slate-200 text-xs">
+              <div className="text-[11px] font-bold text-slate-600 uppercase tracking-wider">
+                Elemen Cetak Struk
+              </div>
+              <div className="flex flex-wrap items-center gap-4">
+                <label className="flex items-center gap-1.5 text-slate-700 font-semibold cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={receiptSettings.showCashier ?? true}
+                    onChange={(e) => setReceiptSettings({ ...receiptSettings, showCashier: e.target.checked })}
+                    className="rounded text-teal-600 focus:ring-teal-500"
+                  />
+                  <span>Tampilkan Kasir</span>
+                </label>
 
-              <label className="flex items-center gap-1.5 text-slate-700 font-semibold cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={receiptSettings.showCustomer ?? true}
-                  onChange={(e) => setReceiptSettings({ ...receiptSettings, showCustomer: e.target.checked })}
-                  className="rounded text-teal-600 focus:ring-teal-500"
-                />
-                <span>Tampilkan Pelanggan & Meja</span>
-              </label>
+                <label className="flex items-center gap-1.5 text-slate-700 font-semibold cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={receiptSettings.showCustomer ?? true}
+                    onChange={(e) => setReceiptSettings({ ...receiptSettings, showCustomer: e.target.checked })}
+                    className="rounded text-teal-600 focus:ring-teal-500"
+                  />
+                  <span>Tampilkan Pelanggan</span>
+                </label>
 
-              <label className="flex items-center gap-1.5 text-slate-700 font-semibold cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={receiptSettings.showTax ?? true}
-                  onChange={(e) => setReceiptSettings({ ...receiptSettings, showTax: e.target.checked })}
-                  className="rounded text-teal-600 focus:ring-teal-500"
-                />
-                <span>Tampilkan Pajak (PB1)</span>
-              </label>
+                {businessType === 'fnb' && (
+                  <label className="flex items-center gap-1.5 text-slate-700 font-semibold cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={receiptSettings.showTableOrService ?? true}
+                      onChange={(e) => setReceiptSettings({ ...receiptSettings, showTableOrService: e.target.checked })}
+                      className="rounded text-teal-600 focus:ring-teal-500"
+                    />
+                    <span>Tampilkan No. Meja & Servis</span>
+                  </label>
+                )}
+
+                {businessType === 'phone' && (
+                  <label className="flex items-center gap-1.5 text-slate-700 font-semibold cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={receiptSettings.showImeiDetails ?? true}
+                      onChange={(e) => setReceiptSettings({ ...receiptSettings, showImeiDetails: e.target.checked })}
+                      className="rounded text-teal-600 focus:ring-teal-500"
+                    />
+                    <span>Tampilkan IMEI & Garansi</span>
+                  </label>
+                )}
+
+                {businessType === 'retail' && (
+                  <label className="flex items-center gap-1.5 text-slate-700 font-semibold cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={receiptSettings.showItemBarcode ?? true}
+                      onChange={(e) => setReceiptSettings({ ...receiptSettings, showItemBarcode: e.target.checked })}
+                      className="rounded text-teal-600 focus:ring-teal-500"
+                    />
+                    <span>Tampilkan Barcode/SKU</span>
+                  </label>
+                )}
+
+                <label className="flex items-center gap-1.5 text-slate-700 font-semibold cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={receiptSettings.showTax ?? true}
+                    onChange={(e) => setReceiptSettings({ ...receiptSettings, showTax: e.target.checked })}
+                    className="rounded text-teal-600 focus:ring-teal-500"
+                  />
+                  <span>Tampilkan Pajak (PB1/PPN)</span>
+                </label>
+              </div>
             </div>
 
             <div className="pt-2 flex justify-end">
@@ -640,121 +730,166 @@ export default function SettingsPage() {
           </div>
 
           {/* Live Preview Column */}
-          <div className="lg:col-span-5 bg-slate-100 p-4 rounded-2xl border border-slate-200 flex flex-col items-center">
-            <div className="text-[11px] font-bold text-slate-600 mb-2 flex items-center gap-1.5">
-              <Printer className="w-3.5 h-3.5 text-teal-600" />
-              <span>Pratinjau Struk Kasir (Live Preview)</span>
-            </div>
+          {(() => {
+            const sampleReceipt = getIndustrySampleReceipt(activeBusiness?.businessType, receiptSettings);
+            return (
+              <div className="lg:col-span-5 bg-slate-100 p-4 rounded-2xl border border-slate-200 flex flex-col items-center">
+                <div className="text-[11px] font-bold text-slate-600 mb-2 flex items-center justify-between w-full px-1">
+                  <div className="flex items-center gap-1.5">
+                    <Printer className="w-3.5 h-3.5 text-teal-600" />
+                    <span>Pratinjau Struk (Live Preview)</span>
+                  </div>
+                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${industryBadge.colorClass}`}>
+                    {industryBadge.badgeText}
+                  </span>
+                </div>
 
-            <div className="bg-white shadow-md border border-slate-300 rounded-lg p-3.5 font-mono text-slate-900 text-[10px] w-full max-w-[260px] space-y-1">
-              {/* Header */}
-              <div className="text-center space-y-0.5 pb-1.5">
-                {receiptSettings.showLogo && receiptSettings.logoUrl && (
-                  <div className="flex justify-center pb-1">
-                    <img
-                      src={receiptSettings.logoUrl}
-                      alt="Logo Toko"
-                      className="max-h-10 max-w-[120px] object-contain filter grayscale contrast-150 mx-auto"
-                      onError={(e) => {
-                        (e.target as HTMLElement).style.display = 'none';
-                      }}
-                    />
+                <div className="bg-white shadow-md border border-slate-300 rounded-lg p-3.5 font-mono text-slate-900 text-[10px] w-full max-w-[270px] space-y-1">
+                  {/* Header */}
+                  <div className="text-center space-y-0.5 pb-1.5">
+                    {receiptSettings.showLogo && receiptSettings.logoUrl && (
+                      <div className="flex justify-center pb-1">
+                        <img
+                          src={receiptSettings.logoUrl}
+                          alt="Logo Toko"
+                          className="max-h-10 max-w-[130px] object-contain filter grayscale contrast-150 mx-auto"
+                          onError={(e) => {
+                            (e.target as HTMLElement).style.display = 'none';
+                          }}
+                        />
+                      </div>
+                    )}
+                    <div className="font-bold text-xs tracking-wider uppercase">
+                      {receiptSettings.storeName || activeBusiness?.name || 'TOKOKOE STORE'}
+                    </div>
+                    {receiptSettings.tagline && (
+                      <div className="text-[9px] italic text-slate-500 font-sans leading-tight">
+                        {receiptSettings.tagline}
+                      </div>
+                    )}
+                    <div className="text-[9px] text-slate-500 font-sans">
+                      {receiptSettings.address || activeBusiness?.address || 'Jl. Operasional Utama No. 12'}
+                    </div>
+                    {receiptSettings.phone && (
+                      <div className="text-[9px] text-slate-500 font-sans">
+                        Telp/WA: {receiptSettings.phone}
+                      </div>
+                    )}
+                    {(receiptSettings.customHeaderNote || sampleReceipt.orderTypeLabel) && (
+                      <div className="text-[9px] font-bold text-slate-700 tracking-wider uppercase border-y border-dashed border-slate-300 py-0.5 mt-1">
+                        {receiptSettings.customHeaderNote || sampleReceipt.orderTypeLabel}
+                      </div>
+                    )}
                   </div>
-                )}
-                <div className="font-bold text-xs tracking-wider uppercase">
-                  {receiptSettings.storeName || activeBusiness?.name || 'TOKOKOE STORE'}
+
+                  <div className="border-t border-dashed border-slate-400 my-1"></div>
+
+                  {/* Sample Meta Details */}
+                  <div className="space-y-0.5 text-[9px] text-slate-600">
+                    {sampleReceipt.metaDetails.map((meta, idx) => {
+                      if (meta.label.includes('Kasir') && receiptSettings.showCashier === false) return null;
+                      if ((meta.label.includes('Pelanggan') || meta.label.includes('Tamu')) && receiptSettings.showCustomer === false) return null;
+                      if (meta.label.includes('Meja') && receiptSettings.showTableOrService === false) return null;
+                      if (meta.label.includes('Garansi') && receiptSettings.showImeiDetails === false) return null;
+                      return (
+                        <div key={idx} className="flex justify-between">
+                          <span>{meta.label}:</span>
+                          <span className="font-semibold text-slate-800">{meta.value}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <div className="border-t border-dashed border-slate-400 my-1"></div>
+
+                  {/* Sample Items tailored per industry */}
+                  <div className="space-y-1.5 py-0.5 text-[9px]">
+                    {sampleReceipt.items.map((item: any, idx: number) => (
+                      <div key={idx} className="space-y-0.5">
+                        <div className="font-semibold text-slate-800 leading-tight">{item.name}</div>
+                        {item.barcode && receiptSettings.showItemBarcode !== false && (
+                          <div className="text-[8px] text-slate-500 font-mono">SKU: {item.barcode}</div>
+                        )}
+                        {item.imei && receiptSettings.showImeiDetails !== false && (
+                          <div className="text-[8px] font-semibold text-blue-700">IMEI: {item.imei}</div>
+                        )}
+                        {item.options && (
+                          <div className="text-[8px] text-slate-500 italic">{item.options}</div>
+                        )}
+                        {item.note && (
+                          <div className="text-[8px] text-teal-700 italic">{item.note}</div>
+                        )}
+                        <div className="flex justify-between text-slate-500">
+                          <span>{item.qty} x Rp {item.price.toLocaleString('id-ID')}</span>
+                          <span className="font-semibold text-slate-800">Rp {item.subtotal.toLocaleString('id-ID')}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="border-t border-dashed border-slate-400 my-1"></div>
+
+                  {/* Totals */}
+                  <div className="space-y-0.5 text-[9px]">
+                    <div className="flex justify-between">
+                      <span>Subtotal:</span>
+                      <span>Rp {sampleReceipt.subtotal.toLocaleString('id-ID')}</span>
+                    </div>
+
+                    {sampleReceipt.discount > 0 && (
+                      <div className="flex justify-between text-emerald-600 font-medium">
+                        <span>Diskon Promosi:</span>
+                        <span>-Rp {sampleReceipt.discount.toLocaleString('id-ID')}</span>
+                      </div>
+                    )}
+
+                    {businessType === 'fnb' && receiptSettings.showTableOrService !== false && sampleReceipt.serviceCharge > 0 && (
+                      <div className="flex justify-between">
+                        <span>Biaya Layanan (5%):</span>
+                        <span>Rp {sampleReceipt.serviceCharge.toLocaleString('id-ID')}</span>
+                      </div>
+                    )}
+
+                    {receiptSettings.showTax !== false && sampleReceipt.tax > 0 && (
+                      <div className="flex justify-between">
+                        <span>Pajak (PB1 Resto 10%):</span>
+                        <span>Rp {sampleReceipt.tax.toLocaleString('id-ID')}</span>
+                      </div>
+                    )}
+
+                    {sampleReceipt.tradeIn && (
+                      <div className="flex justify-between text-amber-700 font-medium">
+                        <span>Tukar Tambah ({sampleReceipt.tradeIn.deviceModel}):</span>
+                        <span>-Rp {sampleReceipt.tradeIn.estimatedValue.toLocaleString('id-ID')}</span>
+                      </div>
+                    )}
+
+                    <div className="border-t border-slate-400 pt-0.5 flex justify-between font-bold text-[10px] text-slate-900">
+                      <span>TOTAL:</span>
+                      <span>Rp {sampleReceipt.total.toLocaleString('id-ID')}</span>
+                    </div>
+
+                    <div className="flex justify-between text-[8px] text-slate-500 pt-0.5">
+                      <span>Metode: {sampleReceipt.paymentMethod}</span>
+                      <span className="font-semibold text-emerald-700">{sampleReceipt.paymentStatus}</span>
+                    </div>
+                  </div>
+
+                  {/* Footer */}
+                  <div className="border-t border-dashed border-slate-400 my-1.5 pt-1 text-center text-[8.5px] text-slate-500 space-y-0.5">
+                    {receiptSettings.footerMessage && (
+                      <div className="font-semibold text-slate-700">{receiptSettings.footerMessage}</div>
+                    )}
+                    {receiptSettings.footerNotes && (
+                      <div className="text-[8px] whitespace-pre-line leading-tight text-slate-600">{receiptSettings.footerNotes}</div>
+                    )}
+                    <div className="text-[8px] font-medium text-teal-700 pt-0.5">{sampleReceipt.footerHighlight}</div>
+                    <div className="text-[7.5px] text-slate-400 pt-0.5">Powered by Tokokoe Cloud POS</div>
+                  </div>
                 </div>
-                {receiptSettings.tagline && (
-                  <div className="text-[9px] italic text-slate-500 font-sans leading-tight">
-                    {receiptSettings.tagline}
-                  </div>
-                )}
-                <div className="text-[9px] text-slate-500 font-sans">
-                  {receiptSettings.address || activeBusiness?.address || 'Jl. Sudirman No. 12, Jakarta'}
-                </div>
-                {receiptSettings.phone && (
-                  <div className="text-[9px] text-slate-500 font-sans">
-                    Telp: {receiptSettings.phone}
-                  </div>
-                )}
               </div>
-
-              <div className="border-t border-dashed border-slate-400 my-1"></div>
-
-              {/* Sample Meta */}
-              <div className="space-y-0.5 text-[9px] text-slate-600">
-                <div className="flex justify-between">
-                  <span>No. Struk:</span>
-                  <span className="font-bold">INV/20261021/001</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>Tanggal:</span>
-                  <span>21/10/2026 11:30</span>
-                </div>
-                {receiptSettings.showCashier !== false && (
-                  <div className="flex justify-between">
-                    <span>Kasir:</span>
-                    <span>Budi (Kasir)</span>
-                  </div>
-                )}
-                {receiptSettings.showCustomer !== false && (
-                  <div className="flex justify-between">
-                    <span>Pelanggan:</span>
-                    <span>Pelanggan Umum</span>
-                  </div>
-                )}
-              </div>
-
-              <div className="border-t border-dashed border-slate-400 my-1"></div>
-
-              {/* Sample Items */}
-              <div className="space-y-1 py-0.5 text-[9px]">
-                <div>
-                  <div className="font-semibold text-slate-800">Contoh Produk A</div>
-                  <div className="flex justify-between text-slate-500">
-                    <span>1 x Rp 25.000</span>
-                    <span className="font-semibold text-slate-800">Rp 25.000</span>
-                  </div>
-                </div>
-                <div>
-                  <div className="font-semibold text-slate-800">Contoh Produk B</div>
-                  <div className="flex justify-between text-slate-500">
-                    <span>2 x Rp 15.000</span>
-                    <span className="font-semibold text-slate-800">Rp 30.000</span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="border-t border-dashed border-slate-400 my-1"></div>
-
-              {/* Totals */}
-              <div className="space-y-0.5 text-[9px]">
-                <div className="flex justify-between">
-                  <span>Subtotal:</span>
-                  <span>Rp 55.000</span>
-                </div>
-                {receiptSettings.showTax !== false && (
-                  <div className="flex justify-between">
-                    <span>Pajak (PB1):</span>
-                    <span>Rp 5.500</span>
-                  </div>
-                )}
-                <div className="border-t border-slate-400 pt-0.5 flex justify-between font-bold text-[10px] text-slate-900">
-                  <span>TOTAL:</span>
-                  <span>Rp 60.500</span>
-                </div>
-              </div>
-
-              {/* Footer */}
-              <div className="border-t border-dashed border-slate-400 my-1.5 pt-1 text-center text-[8.5px] text-slate-500 space-y-0.5">
-                <div className="font-semibold text-slate-700">{receiptSettings.footerMessage}</div>
-                {receiptSettings.footerNotes && (
-                  <div className="text-[8px]">{receiptSettings.footerNotes}</div>
-                )}
-                <div className="text-[7.5px] text-slate-400 pt-0.5">Powered by Tokokoe Cloud POS</div>
-              </div>
-            </div>
-          </div>
+            );
+          })()}
         </div>
       </form>
 

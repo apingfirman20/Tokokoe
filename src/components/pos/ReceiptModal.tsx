@@ -5,11 +5,17 @@ import { Sale, ReceiptSettings } from '@/types';
 import { formatRupiah, processReceiptLogoFile } from '@/lib/utils';
 import { useBusiness } from '@/context/BusinessContext';
 import { 
+  getDefaultReceiptSettings, 
+  getIndustryReceiptBadge, 
+  PRESET_LOGOS 
+} from '@/lib/receipt-presets';
+import { 
   Printer, X, CheckCircle2, AlertTriangle, 
   HelpCircle, MonitorCheck, SlidersHorizontal,
   Copy, Check, Share2, Settings2, Image as ImageIcon,
   Save, Loader2, RotateCcw, ChevronDown, ChevronUp,
-  Store, MapPin, Phone, MessageSquare, Upload, Link2
+  Store, MapPin, Phone, MessageSquare, Upload, Link2,
+  Sparkles, Coffee, Smartphone, ShoppingCart
 } from 'lucide-react';
 
 interface ReceiptModalProps {
@@ -22,21 +28,6 @@ interface ReceiptModalProps {
   branchPhone?: string;
 }
 
-const PRESET_LOGOS = [
-  {
-    name: '☕ Kafe & FnB',
-    url: 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="130" height="38" viewBox="0 0 130 38"><rect width="130" height="38" rx="6" fill="%23111827"/><path d="M22 13h14v8a6 6 0 0 1-6 6h-2a6 6 0 0 1-6-6v-8zm14 2h4a3 3 0 0 1 3 3v2a3 3 0 0 1-3 3h-4v-8z" fill="%23ffffff"/><text x="48" y="24" fill="%23ffffff" font-family="monospace" font-weight="bold" font-size="13">CAFE POS</text></svg>'
-  },
-  {
-    name: '📱 Gadget Store',
-    url: 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="130" height="38" viewBox="0 0 130 38"><rect width="130" height="38" rx="6" fill="%230f172a"/><rect x="20" y="9" width="13" height="21" rx="2.5" fill="none" stroke="%23ffffff" stroke-width="2"/><circle cx="26.5" cy="25.5" r="1.5" fill="%23ffffff"/><text x="42" y="24" fill="%23ffffff" font-family="monospace" font-weight="bold" font-size="12">GADGET ID</text></svg>'
-  },
-  {
-    name: '🛒 Retail Mart',
-    url: 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="130" height="38" viewBox="0 0 130 38"><rect width="130" height="38" rx="6" fill="%231e293b"/><path d="M18 12h4l3 11h10l3-8H24" fill="none" stroke="%23ffffff" stroke-width="2" stroke-linecap="round"/><circle cx="26" cy="27" r="2" fill="%23ffffff"/><circle cx="34" cy="27" r="2" fill="%23ffffff"/><text x="44" y="24" fill="%23ffffff" font-family="monospace" font-weight="bold" font-size="13">MART POS</text></svg>'
-  }
-];
-
 export const ReceiptModal: React.FC<ReceiptModalProps> = ({
   isOpen,
   onClose,
@@ -47,7 +38,9 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
   branchPhone = "0812-3456-7890",
 }) => {
   const { activeBusiness, activeBranch, updateBusinessProfile } = useBusiness();
-  
+  const businessType = activeBusiness?.businessType || 'retail';
+  const industryBadge = getIndustryReceiptBadge(businessType);
+
   const [paperSize, setPaperSize] = useState<'80mm' | '58mm'>('80mm');
   const [printAttempted, setPrintAttempted] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
@@ -58,25 +51,15 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
   const [showUrlInput, setShowUrlInput] = useState(false);
 
   // Receipt Settings State
-  const [settings, setSettings] = useState<ReceiptSettings>({
-    showLogo: true,
-    logoUrl: '',
-    storeName: businessName,
-    tagline: '',
-    address: branchAddress,
-    phone: branchPhone,
-    footerMessage: 'Terima kasih atas kepercayaan Anda!',
-    footerNotes: 'Barang yang telah dibeli sesuai syarat garansi resmi.',
-    showCashier: true,
-    showCustomer: true,
-    showTax: true,
-    paperSize: '80mm',
+  const [settings, setSettings] = useState<ReceiptSettings>(() => {
+    return getDefaultReceiptSettings(activeBusiness, activeBranch);
   });
 
-  // Sync settings on mount / modal open
+  // Sync settings when modal opens or activeBusiness changes
   useEffect(() => {
     if (!isOpen) return;
 
+    const defaults = getDefaultReceiptSettings(activeBusiness, activeBranch);
     const bizSettings = activeBusiness?.receiptSettings;
     const storageKey = activeBusiness ? `tokokoe_receipt_${activeBusiness.id}` : null;
     let localSaved: ReceiptSettings | null = null;
@@ -86,30 +69,34 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
         const raw = localStorage.getItem(storageKey);
         if (raw) localSaved = JSON.parse(raw);
       } catch (e) {
-        // ignore storage parse error
+        // ignore parse error
       }
     }
 
     const merged: ReceiptSettings = {
-      showLogo: bizSettings?.showLogo ?? localSaved?.showLogo ?? (!!activeBusiness?.logoUrl),
-      logoUrl: bizSettings?.logoUrl || localSaved?.logoUrl || activeBusiness?.logoUrl || '',
-      storeName: bizSettings?.storeName || localSaved?.storeName || businessName || activeBusiness?.name || 'Tokokoe Store',
-      tagline: bizSettings?.tagline || localSaved?.tagline || '',
-      address: bizSettings?.address || localSaved?.address || branchAddress || activeBranch?.address || activeBusiness?.address || 'Jl. Sudirman No. 12, Jakarta',
-      phone: bizSettings?.phone || localSaved?.phone || branchPhone || activeBranch?.phone || activeBusiness?.phone || '0812-3456-7890',
-      footerMessage: bizSettings?.footerMessage || localSaved?.footerMessage || 'Terima kasih atas kepercayaan Anda!',
-      footerNotes: bizSettings?.footerNotes || localSaved?.footerNotes || 'Barang yang telah dibeli sesuai syarat garansi resmi.',
-      showCashier: bizSettings?.showCashier ?? localSaved?.showCashier ?? true,
-      showCustomer: bizSettings?.showCustomer ?? localSaved?.showCustomer ?? true,
-      showTax: bizSettings?.showTax ?? localSaved?.showTax ?? true,
-      paperSize: bizSettings?.paperSize || localSaved?.paperSize || '80mm',
+      showLogo: bizSettings?.showLogo ?? localSaved?.showLogo ?? defaults.showLogo,
+      logoUrl: bizSettings?.logoUrl || localSaved?.logoUrl || activeBusiness?.logoUrl || defaults.logoUrl || '',
+      storeName: bizSettings?.storeName || localSaved?.storeName || businessName || activeBusiness?.name || defaults.storeName,
+      tagline: bizSettings?.tagline ?? localSaved?.tagline ?? defaults.tagline,
+      address: bizSettings?.address || localSaved?.address || branchAddress || activeBranch?.address || activeBusiness?.address || defaults.address,
+      phone: bizSettings?.phone || localSaved?.phone || branchPhone || activeBranch?.phone || activeBusiness?.phone || defaults.phone,
+      footerMessage: bizSettings?.footerMessage || localSaved?.footerMessage || defaults.footerMessage,
+      footerNotes: bizSettings?.footerNotes || localSaved?.footerNotes || defaults.footerNotes,
+      customHeaderNote: bizSettings?.customHeaderNote || localSaved?.customHeaderNote || defaults.customHeaderNote,
+      showCashier: bizSettings?.showCashier ?? localSaved?.showCashier ?? defaults.showCashier,
+      showCustomer: bizSettings?.showCustomer ?? localSaved?.showCustomer ?? defaults.showCustomer,
+      showTableOrService: bizSettings?.showTableOrService ?? localSaved?.showTableOrService ?? defaults.showTableOrService,
+      showImeiDetails: bizSettings?.showImeiDetails ?? localSaved?.showImeiDetails ?? defaults.showImeiDetails,
+      showItemBarcode: bizSettings?.showItemBarcode ?? localSaved?.showItemBarcode ?? defaults.showItemBarcode,
+      showTax: bizSettings?.showTax ?? localSaved?.showTax ?? defaults.showTax,
+      paperSize: bizSettings?.paperSize || localSaved?.paperSize || defaults.paperSize || '80mm',
     };
 
     setSettings(merged);
     if (merged.paperSize) {
       setPaperSize(merged.paperSize);
     }
-  }, [isOpen, activeBusiness, activeBranch, businessName, branchAddress, branchPhone]);
+  }, [isOpen, activeBusiness?.id, activeBusiness?.businessType, activeBranch?.id, businessName, branchAddress, branchPhone]);
 
   if (!isOpen || !sale) return null;
 
@@ -142,12 +129,12 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
     setIsSavingSettings(true);
     setSaveSuccessMsg(null);
     try {
-      // 1. Save to localStorage immediately
+      // 1. Save to localStorage specifically for this business ID
       if (activeBusiness) {
         localStorage.setItem(`tokokoe_receipt_${activeBusiness.id}`, JSON.stringify(settings));
       }
 
-      // 2. Persist to server if activeBusiness available
+      // 2. Persist to server in business profile
       if (activeBusiness && updateBusinessProfile) {
         await updateBusinessProfile(activeBusiness.id, {
           name: activeBusiness.name,
@@ -156,8 +143,8 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
         });
       }
 
-      setSaveSuccessMsg('Pengaturan nota berhasil disimpan permanen!');
-      setTimeout(() => setSaveSuccessMsg(null), 3000);
+      setSaveSuccessMsg(`Pengaturan nota khusus bisnis "${activeBusiness?.name || 'Toko'}" berhasil disimpan!`);
+      setTimeout(() => setSaveSuccessMsg(null), 3500);
     } catch (err: any) {
       alert('Gagal menyimpan ke server: ' + (err.message || 'Error'));
     } finally {
@@ -165,20 +152,39 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
     }
   };
 
+  const handleResetToIndustryDefaults = () => {
+    const defaults = getDefaultReceiptSettings(activeBusiness, activeBranch);
+    setSettings(defaults);
+    if (defaults.paperSize) setPaperSize(defaults.paperSize);
+  };
+
   const handleCopyText = async () => {
     try {
-      const itemsList = sale.lineItems.map(item => 
-        `• ${item.productName}\n  ${item.quantity} x ${formatRupiah(item.unitPrice)} = ${formatRupiah(item.subtotal)}` +
-        (item.imei ? `\n  (IMEI: ${item.imei})` : '')
-      ).join('\n');
-
       const activeStoreName = settings.storeName || businessName || activeBusiness?.name || 'TOKOKOE STORE';
       const activeAddr = settings.address || branchAddress || activeBranch?.address || '';
       const activePhone = settings.phone || branchPhone || activeBranch?.phone || '';
 
+      const itemsList = sale.lineItems.map(item => {
+        let line = `• ${item.productName}\n  ${item.quantity} x ${formatRupiah(item.unitPrice)} = ${formatRupiah(item.subtotal)}`;
+        if (item.imei && settings.showImeiDetails !== false) {
+          line += `\n  (IMEI: ${item.imei} - Garansi 1 Thn)`;
+        }
+        if (item.selectedOptions && Object.keys(item.selectedOptions).length > 0) {
+          const opts = Object.entries(item.selectedOptions).map(([k, v]) => `${k}: ${v}`).join(', ');
+          line += `\n  [${opts}]`;
+        }
+        if (item.selectedModifiers && item.selectedModifiers.length > 0) {
+          line += `\n  + ${item.selectedModifiers.join(', ')}`;
+        }
+        return line;
+      }).join('\n');
+
+      const totalQty = sale.lineItems.reduce((acc, it) => acc + it.quantity, 0);
+
       const textReceipt = `================================\n` +
         `       ${activeStoreName.toUpperCase()}\n` +
         (settings.tagline ? `       ${settings.tagline}\n` : '') +
+        (settings.customHeaderNote ? `       [${settings.customHeaderNote}]\n` : '') +
         `       ${branchName}\n` +
         (activeAddr ? `       ${activeAddr}\n` : '') +
         (activePhone ? `       Telp: ${activePhone}\n` : '') +
@@ -187,14 +193,17 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
         `Tanggal   : ${new Date(sale.createdAt).toLocaleDateString('id-ID')} ${new Date(sale.createdAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}\n` +
         (settings.showCashier ? `Kasir     : ${sale.cashierName || 'Kasir'}\n` : '') +
         (settings.showCustomer ? `Pelanggan : ${sale.customerName || 'Umum'}\n` : '') +
-        (settings.showCustomer && sale.tableNumber ? `Meja      : #${sale.tableNumber}\n` : '') +
-        `Layanan   : ${sale.orderType.toUpperCase()}\n` +
+        (settings.showTableOrService !== false && sale.tableNumber ? `Meja      : #${sale.tableNumber}\n` : '') +
+        `Layanan   : ${sale.orderType.toUpperCase().replace('_', ' ')}\n` +
+        (businessType === 'retail' ? `Total Item: ${sale.lineItems.length} Macam (${totalQty} Pcs)\n` : '') +
         `--------------------------------\n` +
         `${itemsList}\n` +
         `--------------------------------\n` +
         `Subtotal  : ${formatRupiah(sale.subtotal)}\n` +
         (sale.discount > 0 ? `Diskon    : -${formatRupiah(sale.discount)}\n` : '') +
-        (settings.showTax && sale.tax > 0 ? `Pajak     : ${formatRupiah(sale.tax)}\n` : '') +
+        (sale.tradeIn && sale.tradeIn.estimatedValue > 0 ? `Tukar Tambah (${sale.tradeIn.deviceModel}) : -${formatRupiah(sale.tradeIn.estimatedValue)}\n` : '') +
+        (settings.showTax && sale.tax > 0 ? `Pajak (${businessType === 'fnb' ? 'PB1 Resto' : 'PPN'}) : ${formatRupiah(sale.tax)}\n` : '') +
+        (sale.serviceCharge > 0 ? `Service Charge : ${formatRupiah(sale.serviceCharge)}\n` : '') +
         `TOTAL     : ${formatRupiah(sale.grandTotal)}\n` +
         `Bayar (${sale.paymentMethod.toUpperCase()}) : ${formatRupiah(sale.paidAmount || sale.grandTotal)}\n` +
         (sale.changeAmount > 0 ? `Kembalian : ${formatRupiah(sale.changeAmount)}\n` : '') +
@@ -227,6 +236,8 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
     refunded: 'DIREFUND / DIKEMBALIKAN',
   }[sale.paymentStatus || 'paid'] || (sale.paymentStatus || 'PAID').toUpperCase();
 
+  const totalItemQty = sale.lineItems.reduce((acc, it) => acc + it.quantity, 0);
+
   return (
     <div className="receipt-modal-backdrop fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-50 p-4 overflow-y-auto">
       <div className="receipt-modal-dialog bg-white rounded-2xl max-w-xl w-full p-6 shadow-2xl border border-slate-200 flex flex-col gap-4 my-8 max-h-[92vh] overflow-y-auto">
@@ -234,11 +245,16 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
         {/* Modal Header */}
         <div className="receipt-hide-on-print flex items-center justify-between pb-3 border-b border-slate-100">
           <div>
-            <h3 className="font-bold text-base text-slate-900 flex items-center gap-2">
-              <span>Pratinjau & Cetak Struk Kasir</span>
-            </h3>
-            <p className="text-xs text-slate-500">
-              Format thermal roll printer 80mm & 58mm standar kasir modern
+            <div className="flex items-center gap-2">
+              <h3 className="font-bold text-base text-slate-900">
+                Pratinjau & Cetak Struk Kasir
+              </h3>
+              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md border ${industryBadge.colorClass}`}>
+                {industryBadge.badgeText}
+              </span>
+            </div>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Format thermal roll printer 80mm & 58mm khusus bisnis <strong>{activeBusiness?.name || 'Anda'}</strong>
             </p>
           </div>
           <div className="flex items-center gap-1.5">
@@ -249,10 +265,10 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                   ? 'bg-teal-600 text-white border-teal-600 shadow-xs' 
                   : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'
               }`}
-              title="Atur logo toko, alamat, no telepon, dan catatan nota"
+              title="Kustomisasi logo, alamat, telepon, dan catatan nota khusus bisnis ini"
             >
               <Settings2 className="w-3.5 h-3.5" />
-              <span>{showSettings ? 'Tutup Setting' : 'Setting Nota'}</span>
+              <span>{showSettings ? 'Tutup Setting' : 'Setting Nota Khusus'}</span>
               {showSettings ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
             </button>
             <button
@@ -270,11 +286,24 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
             <div className="flex items-center justify-between border-b border-slate-200/80 pb-2.5">
               <div className="flex items-center gap-2">
                 <Store className="w-4 h-4 text-teal-600" />
-                <h4 className="font-bold text-xs text-slate-900">Kustomisasi Desain Struk & Identitas Toko</h4>
+                <div>
+                  <h4 className="font-bold text-xs text-slate-900">
+                    Kustomisasi Nota Khusus: {activeBusiness?.name}
+                  </h4>
+                  <p className="text-[10.5px] text-slate-500">
+                    Pengaturan ini independen dan hanya berlaku untuk bisnis <strong>{activeBusiness?.name}</strong>.
+                  </p>
+                </div>
               </div>
-              <span className="text-[10px] text-teal-700 bg-teal-100 font-semibold px-2 py-0.5 rounded-full">
-                Live Preview
-              </span>
+              <button
+                type="button"
+                onClick={handleResetToIndustryDefaults}
+                className="text-[10.5px] font-semibold text-slate-600 hover:text-teal-700 bg-white border border-slate-200 hover:border-teal-300 px-2 py-1 rounded-lg flex items-center gap-1 shadow-2xs transition-all"
+                title="Kembalikan teks & logo ke standar industri bisnis ini"
+              >
+                <RotateCcw className="w-3 h-3" />
+                <span>Reset Standar {businessType.toUpperCase()}</span>
+              </button>
             </div>
 
             {saveSuccessMsg && (
@@ -284,12 +313,12 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
               </div>
             )}
 
-            {/* Section 1: Logo Toko */}
-            <div className="space-y-2 bg-white p-3 rounded-xl border border-slate-200">
+            {/* Section 1: Logo Toko Khusus */}
+            <div className="space-y-3 bg-white p-3.5 rounded-xl border border-slate-200">
               <div className="flex items-center justify-between">
                 <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
                   <ImageIcon className="w-3.5 h-3.5 text-teal-600" />
-                  <span>Logo Toko di Atas Nota</span>
+                  <span>Logo Toko di Nota Struk</span>
                 </label>
                 <label className="relative inline-flex items-center cursor-pointer">
                   <input
@@ -304,15 +333,15 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
 
               {settings.showLogo && (
                 <div className="space-y-3 pt-1">
-                  {/* Primary: File Upload Button */}
+                  {/* Primary: File Upload Dropzone */}
                   <div>
-                    <label className="w-full cursor-pointer flex flex-col items-center justify-center gap-1.5 p-3.5 rounded-xl border-2 border-dashed border-teal-300 hover:border-teal-500 bg-teal-50/50 hover:bg-teal-50/80 transition-all text-center">
+                    <label className="w-full cursor-pointer flex flex-col items-center justify-center gap-1.5 p-3 rounded-xl border-2 border-dashed border-teal-300 hover:border-teal-500 bg-teal-50/50 hover:bg-teal-50/80 transition-all text-center">
                       <div className="flex items-center gap-2 font-bold text-xs text-teal-900">
                         {isUploadingLogo ? <Loader2 className="w-4 h-4 animate-spin text-teal-600" /> : <Upload className="w-4 h-4 text-teal-600" />}
-                        <span>{isUploadingLogo ? 'Sedang memproses logo...' : 'Unggah Gambar Logo dari Perangkat'}</span>
+                        <span>{isUploadingLogo ? 'Sedang memproses logo...' : 'Unggah File Gambar Logo dari HP / Laptop'}</span>
                       </div>
                       <span className="text-[10px] text-teal-700 font-medium">
-                        Klik untuk memilih file PNG, JPG, WebP, atau SVG dari galeri/komputer
+                        Mendukung PNG, JPG, WebP, SVG (Otomatis dikompres & dioptimalkan monokrom printer thermal)
                       </span>
                       <input
                         type="file"
@@ -336,8 +365,8 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                           />
                         </div>
                         <div className="space-y-0.5">
-                          <div className="text-[11px] font-bold text-slate-800">Logo Aktif Terpasang</div>
-                          <div className="text-[9.5px] text-slate-500">Auto-contrast monokrom siap cetak thermal</div>
+                          <div className="text-[11px] font-bold text-slate-800">Logo Khusus Terpasang</div>
+                          <div className="text-[9.5px] text-slate-500">Khusus bisnis: {activeBusiness?.name}</div>
                         </div>
                       </div>
                       <button
@@ -354,13 +383,17 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                   <div className="space-y-1.5 pt-1 border-t border-slate-100">
                     <div className="flex flex-wrap items-center justify-between gap-1 text-[11px]">
                       <div className="flex flex-wrap items-center gap-1.5">
-                        <span className="text-slate-500 font-medium text-[10.5px]">Contoh Preset:</span>
+                        <span className="text-slate-500 font-medium text-[10.5px]">Preset Bawaan:</span>
                         {PRESET_LOGOS.map((preset, idx) => (
                           <button
                             key={idx}
                             type="button"
                             onClick={() => setSettings({ ...settings, logoUrl: preset.url, showLogo: true })}
-                            className="px-2 py-0.5 rounded-md bg-slate-100 hover:bg-teal-50 hover:text-teal-700 text-slate-700 border border-slate-200 transition-colors font-medium text-[10.5px]"
+                            className={`px-2 py-0.5 rounded-md border transition-colors font-medium text-[10.5px] ${
+                              preset.type === businessType
+                                ? 'bg-teal-50 text-teal-800 border-teal-300 font-bold'
+                                : 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200'
+                            }`}
                           >
                             {preset.name}
                           </button>
@@ -383,7 +416,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                           type="text"
                           value={settings.logoUrl || ''}
                           onChange={(e) => setSettings({ ...settings, logoUrl: e.target.value })}
-                          placeholder="Atau tempel URL gambar (https://...)"
+                          placeholder="Tempel tautan URL gambar (https://...)"
                           className="w-full text-xs p-2 rounded-lg border border-slate-300 outline-none focus:border-teal-500"
                         />
                       </div>
@@ -393,7 +426,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
               )}
             </div>
 
-            {/* Section 2: Store Identity & Contact */}
+            {/* Section 2: Identitas & Kontak Khusus */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 bg-white p-3 rounded-xl border border-slate-200">
               <div>
                 <label className="block text-[11px] font-bold text-slate-700 mb-1">
@@ -403,74 +436,90 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                   type="text"
                   value={settings.storeName || ''}
                   onChange={(e) => setSettings({ ...settings, storeName: e.target.value })}
-                  placeholder="Contoh: Kopi Senja Coffee"
+                  placeholder="Nama toko khusus bisnis ini..."
+                  className="w-full text-xs p-2 rounded-lg border border-slate-300 outline-none focus:border-teal-500 font-semibold"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                  Tagline / Sub-judul Khusus
+                </label>
+                <input
+                  type="text"
+                  value={settings.tagline || ''}
+                  onChange={(e) => setSettings({ ...settings, tagline: e.target.value })}
+                  placeholder="Contoh: Freshly Brewed Everyday"
                   className="w-full text-xs p-2 rounded-lg border border-slate-300 outline-none focus:border-teal-500"
                 />
               </div>
 
               <div>
                 <label className="block text-[11px] font-bold text-slate-700 mb-1">
-                  Tagline / Sub-judul (Opsional)
+                  Label Header Struk
                 </label>
                 <input
                   type="text"
-                  value={settings.tagline || ''}
-                  onChange={(e) => setSettings({ ...settings, tagline: e.target.value })}
-                  placeholder="Contoh: Artisan Coffee & Eatery"
+                  value={settings.customHeaderNote || ''}
+                  onChange={(e) => setSettings({ ...settings, customHeaderNote: e.target.value })}
+                  placeholder="Contoh: BILL MEJA & DINE IN / NOTA ELEKTRONIK"
                   className="w-full text-xs p-2 rounded-lg border border-slate-300 outline-none focus:border-teal-500"
                 />
               </div>
 
-              <div className="sm:col-span-2">
+              <div>
                 <label className="block text-[11px] font-bold text-slate-700 mb-1">
-                  Alamat Lengkap Toko
-                </label>
-                <input
-                  type="text"
-                  value={settings.address || ''}
-                  onChange={(e) => setSettings({ ...settings, address: e.target.value })}
-                  placeholder="Contoh: Jl. Senopati No. 45, Kebayoran Baru, Jakarta Selatan"
-                  className="w-full text-xs p-2 rounded-lg border border-slate-300 outline-none focus:border-teal-500"
-                />
-              </div>
-
-              <div className="sm:col-span-2">
-                <label className="block text-[11px] font-bold text-slate-700 mb-1">
-                  Nomor Telepon / WhatsApp Toko
+                  No. Telepon / WhatsApp Toko
                 </label>
                 <input
                   type="text"
                   value={settings.phone || ''}
                   onChange={(e) => setSettings({ ...settings, phone: e.target.value })}
-                  placeholder="Contoh: 0812-9988-7766 / @tokokoe"
+                  placeholder="Contoh: 0812-3456-7890"
+                  className="w-full text-xs p-2 rounded-lg border border-slate-300 outline-none focus:border-teal-500"
+                />
+              </div>
+
+              <div className="sm:col-span-2">
+                <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                  Alamat Lengkap Toko / Outlet
+                </label>
+                <textarea
+                  rows={2}
+                  value={settings.address || ''}
+                  onChange={(e) => setSettings({ ...settings, address: e.target.value })}
+                  placeholder="Alamat fisik toko ini..."
                   className="w-full text-xs p-2 rounded-lg border border-slate-300 outline-none focus:border-teal-500"
                 />
               </div>
             </div>
 
-            {/* Section 3: Footer Message & Terms */}
+            {/* Section 3: Pesan Footer & Kebijakan Khusus */}
             <div className="space-y-2 bg-white p-3 rounded-xl border border-slate-200">
               <label className="block text-[11px] font-bold text-slate-700">
-                Pesan Kaki Struk (Footer Message)
+                Pesan Penutup Struk
               </label>
               <input
                 type="text"
                 value={settings.footerMessage || ''}
                 onChange={(e) => setSettings({ ...settings, footerMessage: e.target.value })}
-                placeholder="Contoh: Terima kasih atas kunjungan Anda!"
+                placeholder="Pesan penutup..."
                 className="w-full text-xs p-2 rounded-lg border border-slate-300 outline-none focus:border-teal-500"
               />
+              <label className="block text-[11px] font-bold text-slate-700 pt-1">
+                Catatan Garansi / Kebijakan Toko / Info Wifi
+              </label>
               <textarea
                 rows={2}
                 value={settings.footerNotes || ''}
                 onChange={(e) => setSettings({ ...settings, footerNotes: e.target.value })}
-                placeholder="Syarat garansi / catatan tambahan (misal: Barang yg dibeli tidak dapat ditukar kecuali rusak pabrik)."
+                placeholder="Syarat garansi, password wifi, atau catatan retur..."
                 className="w-full text-xs p-2 rounded-lg border border-slate-300 outline-none focus:border-teal-500"
               />
             </div>
 
-            {/* Section 4: Print Details Toggles */}
-            <div className="flex flex-wrap items-center gap-4 bg-white p-3 rounded-xl border border-slate-200 text-xs">
+            {/* Section 4: Print Details Toggles (Specialized) */}
+            <div className="flex flex-wrap items-center gap-3 bg-white p-3 rounded-xl border border-slate-200 text-xs">
               <label className="flex items-center gap-1.5 text-slate-700 font-medium cursor-pointer">
                 <input
                   type="checkbox"
@@ -488,8 +537,32 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                   onChange={(e) => setSettings({ ...settings, showCustomer: e.target.checked })}
                   className="rounded text-teal-600 focus:ring-teal-500"
                 />
-                <span>Tampilkan Pelanggan / Meja</span>
+                <span>Tampilkan Pelanggan</span>
               </label>
+
+              {businessType === 'fnb' && (
+                <label className="flex items-center gap-1.5 text-slate-700 font-medium cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={settings.showTableOrService ?? true}
+                    onChange={(e) => setSettings({ ...settings, showTableOrService: e.target.checked })}
+                    className="rounded text-teal-600 focus:ring-teal-500"
+                  />
+                  <span>Tampilkan Meja & Dine In</span>
+                </label>
+              )}
+
+              {businessType === 'phone' && (
+                <label className="flex items-center gap-1.5 text-slate-700 font-medium cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={settings.showImeiDetails ?? true}
+                    onChange={(e) => setSettings({ ...settings, showImeiDetails: e.target.checked })}
+                    className="rounded text-teal-600 focus:ring-teal-500"
+                  />
+                  <span>Tampilkan Nomor IMEI</span>
+                </label>
+              )}
 
               <label className="flex items-center gap-1.5 text-slate-700 font-medium cursor-pointer">
                 <input
@@ -498,14 +571,14 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                   onChange={(e) => setSettings({ ...settings, showTax: e.target.checked })}
                   className="rounded text-teal-600 focus:ring-teal-500"
                 />
-                <span>Tampilkan Pajak (PB1)</span>
+                <span>Tampilkan Pajak ({businessType === 'fnb' ? 'PB1' : 'PPN'})</span>
               </label>
             </div>
 
             {/* Save Button */}
             <div className="flex items-center justify-between pt-1">
               <span className="text-[11px] text-slate-500">
-                Otomatis disinkronkan ke cloud & browser kasir
+                Disimpan ganda ke database cloud & browser kasir
               </span>
               <button
                 type="button"
@@ -514,7 +587,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                 className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs shadow-xs disabled:opacity-50 transition-all active:scale-95"
               >
                 {isSavingSettings ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
-                <span>{isSavingSettings ? 'Menyimpan...' : 'Simpan Pengaturan Nota'}</span>
+                <span>{isSavingSettings ? 'Menyimpan...' : `Simpan Nota ${activeBusiness?.name || ''}`}</span>
               </button>
             </div>
           </div>
@@ -561,7 +634,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
           <div className="flex items-center gap-2 p-2.5 rounded-xl bg-teal-50 border border-teal-200 text-teal-800 text-xs font-medium">
             <MonitorCheck className="w-4 h-4 text-teal-600 shrink-0" />
             <span>
-              <strong>Siap Cetak Thermal:</strong> Margin browser otomatis dinonaktifkan saat cetak (Print Dialog).
+              <strong>Layout Khusus {businessType.toUpperCase()}:</strong> Format disesuaikan dengan jenis usaha {industryBadge.label.toLowerCase()}.
             </span>
           </div>
         </div>
@@ -596,6 +669,11 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                   {settings.tagline}
                 </div>
               )}
+              {settings.customHeaderNote && (
+                <div className="text-[8.5px] font-bold text-slate-700 tracking-wider uppercase pt-0.5 font-sans">
+                  [{settings.customHeaderNote}]
+                </div>
+              )}
               <div className="text-[10px] text-slate-600 font-sans">{branchName}</div>
               <div className="text-[9px] text-slate-500 font-sans">
                 {settings.address || branchAddress || activeBranch?.address || 'Jl. Sudirman No. 12, Jakarta'}
@@ -621,7 +699,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
               </div>
               {settings.showCashier !== false && (
                 <div className="flex justify-between">
-                  <span>Kasir:</span>
+                  <span>{businessType === 'fnb' ? 'Kasir/Waiter:' : 'Kasir:'}</span>
                   <span>{sale.cashierName || 'Kasir'}</span>
                 </div>
               )}
@@ -631,16 +709,22 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                   <span>{sale.customerName || 'Pelanggan Umum'}</span>
                 </div>
               )}
-              {settings.showCustomer !== false && sale.tableNumber && (
-                <div className="flex justify-between">
-                  <span>Meja:</span>
-                  <span className="font-bold">Meja #{sale.tableNumber}</span>
+              {settings.showTableOrService !== false && sale.tableNumber && (
+                <div className="flex justify-between font-bold text-slate-900 bg-slate-100 px-1 py-0.5 rounded my-0.5">
+                  <span>Nomor Meja:</span>
+                  <span>MEJA #{sale.tableNumber}</span>
                 </div>
               )}
               <div className="flex justify-between">
                 <span>Layanan:</span>
-                <span className="uppercase">{sale.orderType.replace('_', ' ')}</span>
+                <span className="uppercase font-semibold">{sale.orderType.replace('_', ' ')}</span>
               </div>
+              {businessType === 'retail' && (
+                <div className="flex justify-between text-[9px] text-slate-600">
+                  <span>Total Belanja:</span>
+                  <span>{sale.lineItems.length} Macam ({totalItemQty} Pcs)</span>
+                </div>
+              )}
             </div>
 
             <div className="border-t border-dashed border-slate-400 my-2"></div>
@@ -657,24 +741,24 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                     <span className="tabular-nums font-semibold text-slate-900">{formatRupiah(item.subtotal)}</span>
                   </div>
 
-                  {/* Serial Number & Warranty */}
-                  {item.imei && (
-                    <div className="text-[9px] text-teal-800 bg-teal-50 px-1 py-0.5 rounded border border-teal-200 mt-0.5">
-                      IMEI: <strong>{item.imei}</strong>
-                      <div className="text-[8.5px] text-teal-600">
-                        Garansi Aktif Resmi: 1 Tahun
+                  {/* Serial Number & Warranty (Khusus Gadget/Phone) */}
+                  {item.imei && settings.showImeiDetails !== false && (
+                    <div className="text-[9px] text-slate-800 bg-slate-50 px-1 py-0.5 rounded border border-slate-300 mt-0.5 space-y-0.5 font-sans">
+                      <div>IMEI: <strong>{item.imei}</strong></div>
+                      <div className="text-[8.5px] text-slate-600">
+                        Garansi Unit Resmi 1 Tahun • Segel Utuh
                       </div>
                     </div>
                   )}
 
-                  {/* Modifiers & Options */}
+                  {/* Modifiers & Options (Khusus FnB / Resto) */}
                   {item.selectedOptions && Object.keys(item.selectedOptions).length > 0 && (
-                    <div className="text-[8.5px] text-slate-500 pl-1">
+                    <div className="text-[8.5px] text-slate-500 pl-1 font-sans">
                       {Object.entries(item.selectedOptions).map(([k, v]) => `${k}: ${v}`).join(', ')}
                     </div>
                   )}
                   {item.selectedModifiers && item.selectedModifiers.length > 0 && (
-                    <div className="text-[8.5px] text-slate-500 pl-1">
+                    <div className="text-[8.5px] text-slate-500 pl-1 font-sans">
                       + {item.selectedModifiers.join(', ')}
                     </div>
                   )}
@@ -698,24 +782,25 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                 </div>
               )}
 
+              {/* Tukar Tambah (Khusus Phone Store) */}
+              {sale.tradeIn && sale.tradeIn.estimatedValue > 0 && (
+                <div className="flex justify-between text-amber-900 font-semibold bg-amber-50 px-1 py-0.5 rounded">
+                  <span>Tukar Tambah ({sale.tradeIn.deviceModel}):</span>
+                  <span className="tabular-nums">-{formatRupiah(sale.tradeIn.estimatedValue)}</span>
+                </div>
+              )}
+
               {settings.showTax !== false && sale.tax > 0 && (
                 <div className="flex justify-between">
-                  <span>Pajak (PB1/PPN):</span>
+                  <span>Pajak ({businessType === 'fnb' ? 'PB1 Resto' : 'PPN'}):</span>
                   <span className="tabular-nums">{formatRupiah(sale.tax)}</span>
                 </div>
               )}
 
               {sale.serviceCharge > 0 && (
                 <div className="flex justify-between">
-                  <span>Biaya Layanan:</span>
+                  <span>Biaya Layanan (Service):</span>
                   <span className="tabular-nums">{formatRupiah(sale.serviceCharge)}</span>
-                </div>
-              )}
-
-              {sale.tradeIn && sale.tradeIn.estimatedValue > 0 && (
-                <div className="flex justify-between text-amber-700 font-medium">
-                  <span>Tukar Tambah ({sale.tradeIn.deviceModel}):</span>
-                  <span className="tabular-nums">-{formatRupiah(sale.tradeIn.estimatedValue)}</span>
                 </div>
               )}
 
@@ -723,6 +808,12 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                 <span>TOTAL:</span>
                 <span className="tabular-nums">{formatRupiah(sale.grandTotal)}</span>
               </div>
+
+              {businessType === 'retail' && sale.discount > 0 && (
+                <div className="text-center font-bold text-[9px] text-slate-800 bg-slate-100 py-0.5 rounded mt-0.5">
+                  *** ANDA HEMAT {formatRupiah(sale.discount)} ***
+                </div>
+              )}
             </div>
 
             <div className="border-t border-dashed border-slate-400 my-2"></div>
@@ -772,10 +863,10 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
               )}
             </div>
 
-            {/* Footer Struk */}
-            <div className="border-t border-dashed border-slate-400 my-2 pt-2 text-center text-[9px] text-slate-500 space-y-0.5">
-              <div className="font-semibold text-slate-700">{settings.footerMessage || 'Terima kasih atas kepercayaan Anda!'}</div>
-              {settings.footerNotes && <div>{settings.footerNotes}</div>}
+            {/* Footer Struk Khusus Industri */}
+            <div className="border-t border-dashed border-slate-400 my-2 pt-2 text-center text-[9px] text-slate-600 space-y-0.5 whitespace-pre-line">
+              <div className="font-semibold text-slate-800">{settings.footerMessage}</div>
+              {settings.footerNotes && <div className="text-slate-500">{settings.footerNotes}</div>}
               <div className="text-[8px] text-slate-400 pt-0.5">Powered by Tokokoe Cloud POS</div>
             </div>
           </div>

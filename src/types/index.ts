@@ -54,6 +54,10 @@ export interface ReceiptSettings {
   showCustomer?: boolean;
   showTax?: boolean;
   paperSize?: '80mm' | '58mm';
+  customHeaderNote?: string;
+  showTableOrService?: boolean;
+  showImeiDetails?: boolean;
+  showItemBarcode?: boolean;
 }
 
 export interface Business {

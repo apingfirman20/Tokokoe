@@ -17,6 +17,10 @@ const receiptSettingsSchema = z.object({
   showCustomer: z.boolean().optional(),
   showTax: z.boolean().optional(),
   paperSize: z.enum(["80mm", "58mm"]).optional(),
+  customHeaderNote: z.string().optional(),
+  showTableOrService: z.boolean().optional(),
+  showImeiDetails: z.boolean().optional(),
+  showItemBarcode: z.boolean().optional(),
 }).optional();
 
 const updateProfileSchema = z.object({
