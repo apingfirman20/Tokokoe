@@ -2,14 +2,14 @@
 
 import React, { useState, useEffect } from 'react';
 import { Sale, ReceiptSettings } from '@/types';
-import { formatRupiah } from '@/lib/utils';
+import { formatRupiah, processReceiptLogoFile } from '@/lib/utils';
 import { useBusiness } from '@/context/BusinessContext';
 import { 
   Printer, X, CheckCircle2, AlertTriangle, 
   HelpCircle, MonitorCheck, SlidersHorizontal,
   Copy, Check, Share2, Settings2, Image as ImageIcon,
   Save, Loader2, RotateCcw, ChevronDown, ChevronUp,
-  Store, MapPin, Phone, MessageSquare
+  Store, MapPin, Phone, MessageSquare, Upload, Link2
 } from 'lucide-react';
 
 interface ReceiptModalProps {
@@ -54,6 +54,8 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
   const [showSettings, setShowSettings] = useState(false);
   const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [saveSuccessMsg, setSaveSuccessMsg] = useState<string | null>(null);
+  const [isUploadingLogo, setIsUploadingLogo] = useState(false);
+  const [showUrlInput, setShowUrlInput] = useState(false);
 
   // Receipt Settings State
   const [settings, setSettings] = useState<ReceiptSettings>({
@@ -110,6 +112,26 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
   }, [isOpen, activeBusiness, activeBranch, businessName, branchAddress, branchPhone]);
 
   if (!isOpen || !sale) return null;
+
+  const handleFileLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsUploadingLogo(true);
+    try {
+      const dataUrl = await processReceiptLogoFile(file);
+      setSettings(prev => ({
+        ...prev,
+        showLogo: true,
+        logoUrl: dataUrl,
+      }));
+    } catch (err: any) {
+      alert(err.message || 'Gagal memproses file gambar logo.');
+    } finally {
+      setIsUploadingLogo(false);
+      e.target.value = '';
+    }
+  };
 
   const handlePrint = () => {
     setPrintAttempted(true);
@@ -281,57 +303,92 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
               </div>
 
               {settings.showLogo && (
-                <div className="space-y-2 pt-1">
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      value={settings.logoUrl || ''}
-                      onChange={(e) => setSettings({ ...settings, logoUrl: e.target.value })}
-                      placeholder="Masukkan URL Logo (https://... atau SVG/PNG)"
-                      className="flex-1 text-xs p-2 rounded-lg border border-slate-300 outline-none focus:border-teal-500"
-                    />
-                    {settings.logoUrl && (
+                <div className="space-y-3 pt-1">
+                  {/* Primary: File Upload Button */}
+                  <div>
+                    <label className="w-full cursor-pointer flex flex-col items-center justify-center gap-1.5 p-3.5 rounded-xl border-2 border-dashed border-teal-300 hover:border-teal-500 bg-teal-50/50 hover:bg-teal-50/80 transition-all text-center">
+                      <div className="flex items-center gap-2 font-bold text-xs text-teal-900">
+                        {isUploadingLogo ? <Loader2 className="w-4 h-4 animate-spin text-teal-600" /> : <Upload className="w-4 h-4 text-teal-600" />}
+                        <span>{isUploadingLogo ? 'Sedang memproses logo...' : 'Unggah Gambar Logo dari Perangkat'}</span>
+                      </div>
+                      <span className="text-[10px] text-teal-700 font-medium">
+                        Klik untuk memilih file PNG, JPG, WebP, atau SVG dari galeri/komputer
+                      </span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={handleFileLogoUpload}
+                        className="hidden"
+                        disabled={isUploadingLogo}
+                      />
+                    </label>
+                  </div>
+
+                  {/* Thumbnail & Actions if logo exists */}
+                  {settings.logoUrl && (
+                    <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-200 flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-3">
+                        <div className="h-10 w-24 bg-white border border-slate-200 rounded-lg flex items-center justify-center p-1 overflow-hidden shrink-0">
+                          <img 
+                            src={settings.logoUrl} 
+                            alt="Preview Logo" 
+                            className="max-h-8 max-w-full object-contain filter grayscale contrast-125"
+                          />
+                        </div>
+                        <div className="space-y-0.5">
+                          <div className="text-[11px] font-bold text-slate-800">Logo Aktif Terpasang</div>
+                          <div className="text-[9.5px] text-slate-500">Auto-contrast monokrom siap cetak thermal</div>
+                        </div>
+                      </div>
                       <button
                         type="button"
                         onClick={() => setSettings({ ...settings, logoUrl: '' })}
-                        className="px-2.5 py-1 text-[11px] text-slate-500 hover:text-rose-600 bg-slate-100 rounded-lg hover:bg-rose-50"
-                        title="Hapus Logo"
+                        className="px-2.5 py-1 text-xs font-semibold text-rose-600 hover:text-rose-700 bg-rose-50 hover:bg-rose-100 rounded-lg border border-rose-200 transition-colors"
                       >
                         Hapus
                       </button>
-                    )}
-                  </div>
-
-                  {/* Preset Buttons */}
-                  <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
-                    <span className="text-slate-500 font-medium">Contoh Logo Instan:</span>
-                    {PRESET_LOGOS.map((preset, idx) => (
-                      <button
-                        key={idx}
-                        type="button"
-                        onClick={() => setSettings({ ...settings, logoUrl: preset.url, showLogo: true })}
-                        className="px-2 py-0.5 rounded-md bg-slate-100 hover:bg-teal-50 hover:text-teal-700 text-slate-700 border border-slate-200 transition-colors font-medium text-[10.5px]"
-                      >
-                        {preset.name}
-                      </button>
-                    ))}
-                  </div>
-
-                  {/* Thumbnail Preview */}
-                  {settings.logoUrl && (
-                    <div className="p-2 bg-slate-50 rounded-lg border border-dashed border-slate-300 flex items-center gap-3">
-                      <div className="h-10 w-24 bg-white border border-slate-200 rounded flex items-center justify-center p-1 overflow-hidden shrink-0">
-                        <img 
-                          src={settings.logoUrl} 
-                          alt="Preview Logo" 
-                          className="max-h-8 max-w-full object-contain filter grayscale contrast-125"
-                        />
-                      </div>
-                      <span className="text-[10px] text-slate-500 leading-tight">
-                        Logo otomatis dioptimasi warna monokrom grayscale agar cetak di thermal printer tidak bleber.
-                      </span>
                     </div>
                   )}
+
+                  {/* Secondary: Sample Presets & URL Option */}
+                  <div className="space-y-1.5 pt-1 border-t border-slate-100">
+                    <div className="flex flex-wrap items-center justify-between gap-1 text-[11px]">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="text-slate-500 font-medium text-[10.5px]">Contoh Preset:</span>
+                        {PRESET_LOGOS.map((preset, idx) => (
+                          <button
+                            key={idx}
+                            type="button"
+                            onClick={() => setSettings({ ...settings, logoUrl: preset.url, showLogo: true })}
+                            className="px-2 py-0.5 rounded-md bg-slate-100 hover:bg-teal-50 hover:text-teal-700 text-slate-700 border border-slate-200 transition-colors font-medium text-[10.5px]"
+                          >
+                            {preset.name}
+                          </button>
+                        ))}
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => setShowUrlInput(!showUrlInput)}
+                        className="text-[10.5px] font-medium text-slate-500 hover:text-teal-600 flex items-center gap-1 underline underline-offset-2"
+                      >
+                        <Link2 className="w-3 h-3" />
+                        <span>{showUrlInput ? 'Sembunyikan URL' : 'Gunakan URL'}</span>
+                      </button>
+                    </div>
+
+                    {showUrlInput && (
+                      <div className="pt-1">
+                        <input
+                          type="text"
+                          value={settings.logoUrl || ''}
+                          onChange={(e) => setSettings({ ...settings, logoUrl: e.target.value })}
+                          placeholder="Atau tempel URL gambar (https://...)"
+                          className="w-full text-xs p-2 rounded-lg border border-slate-300 outline-none focus:border-teal-500"
+                        />
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
             </div>

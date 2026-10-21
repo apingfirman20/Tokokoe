@@ -3,11 +3,12 @@
 import React, { useState, useEffect } from 'react';
 import { useBusiness } from '@/context/BusinessContext';
 import { Branch, ReceiptSettings } from '@/types';
+import { processReceiptLogoFile } from '@/lib/utils';
 import { 
   Building2, MapPin, Plus, Check, Edit2, Archive, 
   CreditCard, AlertCircle, Save, Loader2, CheckCircle2,
   Receipt, Image as ImageIcon, SlidersHorizontal, Printer,
-  Store, Sparkles, X
+  Store, Sparkles, X, Upload, Link2
 } from 'lucide-react';
 
 const PRESET_LOGOS = [
@@ -59,6 +60,8 @@ export default function SettingsPage() {
   const [isSavingReceipt, setIsSavingReceipt] = useState(false);
   const [receiptFeedback, setReceiptFeedback] = useState<string | null>(null);
   const [receiptError, setReceiptError] = useState<string | null>(null);
+  const [isUploadingReceiptLogo, setIsUploadingReceiptLogo] = useState(false);
+  const [showReceiptUrlInput, setShowReceiptUrlInput] = useState(false);
 
   // Synchronize state when activeBusiness changes
   useEffect(() => {
@@ -142,6 +145,26 @@ export default function SettingsPage() {
       setProfileError(err.message || 'Terjadi kesalahan sistem.');
     } finally {
       setIsSavingProfile(false);
+    }
+  };
+
+  const handleReceiptLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsUploadingReceiptLogo(true);
+    try {
+      const dataUrl = await processReceiptLogoFile(file);
+      setReceiptSettings(prev => ({
+        ...prev,
+        showLogo: true,
+        logoUrl: dataUrl,
+      }));
+    } catch (err: any) {
+      alert(err.message || 'Gagal memproses file gambar logo.');
+    } finally {
+      setIsUploadingReceiptLogo(false);
+      e.target.value = '';
     }
   };
 
@@ -397,44 +420,91 @@ export default function SettingsPage() {
               </div>
 
               {receiptSettings.showLogo && (
-                <div className="space-y-2.5 pt-1">
+                <div className="space-y-3 pt-1">
+                  {/* Primary: File Upload Dropzone */}
                   <div>
-                    <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                      URL Gambar Logo (HTTPS / SVG / PNG)
-                    </label>
-                    <div className="flex gap-2">
+                    <label className="w-full cursor-pointer flex flex-col items-center justify-center gap-1.5 p-4 rounded-xl border-2 border-dashed border-teal-300 hover:border-teal-500 bg-teal-50/40 hover:bg-teal-50/80 transition-all text-center">
+                      <div className="flex items-center gap-2 font-bold text-xs text-teal-900">
+                        {isUploadingReceiptLogo ? <Loader2 className="w-4 h-4 animate-spin text-teal-600" /> : <Upload className="w-4 h-4 text-teal-600" />}
+                        <span>{isUploadingReceiptLogo ? 'Sedang memproses logo...' : 'Unggah Gambar Logo dari Perangkat (Galeri / Komputer)'}</span>
+                      </div>
+                      <span className="text-[11px] text-teal-700 font-medium">
+                        Klik untuk memilih file PNG, JPG, WebP, atau SVG (otomatis dioptimasi untuk printer thermal)
+                      </span>
                       <input
-                        type="text"
-                        value={receiptSettings.logoUrl || ''}
-                        onChange={(e) => setReceiptSettings({ ...receiptSettings, logoUrl: e.target.value })}
-                        placeholder="https://... atau paste gambar URL"
-                        className="flex-1 text-xs p-2.5 rounded-xl bg-white border border-slate-300 outline-none focus:border-teal-500"
+                        type="file"
+                        accept="image/*"
+                        onChange={handleReceiptLogoUpload}
+                        className="hidden"
+                        disabled={isUploadingReceiptLogo}
                       />
-                      {receiptSettings.logoUrl && (
-                        <button
-                          type="button"
-                          onClick={() => setReceiptSettings({ ...receiptSettings, logoUrl: '' })}
-                          className="px-3 py-1.5 text-xs text-rose-600 bg-rose-50 hover:bg-rose-100 rounded-xl font-semibold border border-rose-200 transition-colors"
-                        >
-                          Hapus
-                        </button>
-                      )}
-                    </div>
+                    </label>
                   </div>
 
-                  {/* Instant Presets */}
-                  <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
-                    <span className="text-slate-500 font-medium">Contoh Logo Siap Pakai:</span>
-                    {PRESET_LOGOS.map((preset, idx) => (
+                  {/* Thumbnail & Actions if logo exists */}
+                  {receiptSettings.logoUrl && (
+                    <div className="p-3 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-3 shadow-2xs">
+                      <div className="flex items-center gap-3">
+                        <div className="h-11 w-28 bg-slate-50 border border-slate-200 rounded-lg flex items-center justify-center p-1 overflow-hidden shrink-0">
+                          <img 
+                            src={receiptSettings.logoUrl} 
+                            alt="Preview Logo" 
+                            className="max-h-9 max-w-full object-contain filter grayscale contrast-125"
+                          />
+                        </div>
+                        <div className="space-y-0.5">
+                          <div className="text-xs font-bold text-slate-800">Logo Struk Aktif</div>
+                          <div className="text-[10px] text-slate-500">Gambar disimpan langsung dalam profil usaha</div>
+                        </div>
+                      </div>
                       <button
-                        key={idx}
                         type="button"
-                        onClick={() => setReceiptSettings({ ...receiptSettings, logoUrl: preset.url, showLogo: true })}
-                        className="px-2.5 py-1 rounded-lg bg-white hover:bg-teal-50 hover:text-teal-700 text-slate-700 border border-slate-200 font-semibold text-[11px] shadow-2xs transition-all"
+                        onClick={() => setReceiptSettings({ ...receiptSettings, logoUrl: '' })}
+                        className="px-3 py-1.5 text-xs font-semibold text-rose-600 hover:text-rose-700 bg-rose-50 hover:bg-rose-100 rounded-xl border border-rose-200 transition-colors"
                       >
-                        {preset.name}
+                        Hapus Logo
                       </button>
-                    ))}
+                    </div>
+                  )}
+
+                  {/* Secondary: Sample Presets & URL Option */}
+                  <div className="space-y-2 pt-1 border-t border-slate-200/60">
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="text-slate-500 font-medium">Atau Contoh Logo Siap Pakai:</span>
+                        {PRESET_LOGOS.map((preset, idx) => (
+                          <button
+                            key={idx}
+                            type="button"
+                            onClick={() => setReceiptSettings({ ...receiptSettings, logoUrl: preset.url, showLogo: true })}
+                            className="px-2.5 py-1 rounded-lg bg-white hover:bg-teal-50 hover:text-teal-700 text-slate-700 border border-slate-200 font-semibold text-[11px] shadow-2xs transition-all"
+                          >
+                            {preset.name}
+                          </button>
+                        ))}
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => setShowReceiptUrlInput(!showReceiptUrlInput)}
+                        className="text-[11px] font-medium text-slate-500 hover:text-teal-600 flex items-center gap-1 underline underline-offset-2"
+                      >
+                        <Link2 className="w-3.5 h-3.5" />
+                        <span>{showReceiptUrlInput ? 'Sembunyikan URL' : 'Input URL Gambar'}</span>
+                      </button>
+                    </div>
+
+                    {showReceiptUrlInput && (
+                      <div className="pt-1">
+                        <input
+                          type="text"
+                          value={receiptSettings.logoUrl || ''}
+                          onChange={(e) => setReceiptSettings({ ...receiptSettings, logoUrl: e.target.value })}
+                          placeholder="Tempel tautan URL gambar (https://...)"
+                          className="w-full text-xs p-2.5 rounded-xl bg-white border border-slate-300 outline-none focus:border-teal-500"
+                        />
+                      </div>
+                    )}
                   </div>
                 </div>
               )}

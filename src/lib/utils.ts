@@ -55,3 +55,54 @@ export function cleanUndefined<T extends Record<string, any>>(obj: T): T {
   return cleaned as T;
 }
 
+/**
+ * Resize and compress uploaded image for optimal thermal receipt printing and lightweight storage (< 40KB).
+ * Resizes max width to 240px and max height to 120px, exporting as clean PNG data URL.
+ */
+export function processReceiptLogoFile(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    if (!file.type.startsWith('image/')) {
+      reject(new Error('File yang dipilih bukan gambar valid.'));
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const MAX_WIDTH = 240;
+        const MAX_HEIGHT = 120;
+        let width = img.width;
+        let height = img.height;
+
+        if (width > MAX_WIDTH) {
+          height = Math.round((height * MAX_WIDTH) / width);
+          width = MAX_WIDTH;
+        }
+        if (height > MAX_HEIGHT) {
+          width = Math.round((width * MAX_HEIGHT) / height);
+          height = MAX_HEIGHT;
+        }
+
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          resolve(e.target?.result as string);
+          return;
+        }
+
+        ctx.drawImage(img, 0, 0, width, height);
+        // Export as PNG (preserves transparency)
+        const dataUrl = canvas.toDataURL('image/png', 0.9);
+        resolve(dataUrl);
+      };
+      img.onerror = () => reject(new Error('Gagal memproses data gambar.'));
+      img.src = e.target?.result as string;
+    };
+    reader.onerror = () => reject(new Error('Gagal membaca file gambar dari perangkat.'));
+    reader.readAsDataURL(file);
+  });
+}
+
