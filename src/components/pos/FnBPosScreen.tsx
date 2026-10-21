@@ -8,7 +8,8 @@ import { formatRupiah, parseRupiah } from '@/lib/utils';
 import { 
   Coffee, Search, Plus, Minus, Trash2, CreditCard, 
   Banknote, Receipt, CheckCircle2, Clock, X, ChefHat, 
-  UtensilsCrossed, AlertCircle, Printer, RotateCcw, ArrowDownLeft
+  UtensilsCrossed, AlertCircle, Printer, RotateCcw, ArrowDownLeft,
+  ChevronRight, SlidersHorizontal, Users, MoreHorizontal, Sparkles
 } from 'lucide-react';
 import { ReceiptModal } from './ReceiptModal';
 import { playPosSound } from '@/lib/audio';
@@ -363,27 +364,27 @@ export function FnBPosScreen() {
   };
 
   return (
-    <div className="flex flex-col gap-4 -m-4 md:-m-6 lg:-m-8">
+    <div className="flex flex-col gap-5 -m-2 sm:-m-4 md:-m-6">
       {/* 1. OPERATIONAL SUB-BAR (Stitch F&B Meta Bar) */}
-      <section className="bg-white border-b border-slate-200 px-6 py-3.5 flex flex-wrap items-center justify-between gap-4 sticky top-16 z-20 shadow-xs">
-        <div className="flex flex-wrap items-center gap-6">
+      <section className="bg-white border border-slate-200/90 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-4 shadow-xs">
+        <div className="flex flex-wrap items-center gap-5">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-teal-50 text-teal-700 flex items-center justify-center border border-teal-200">
+            <div className="w-11 h-11 rounded-2xl bg-teal-50 text-teal-700 flex items-center justify-center border border-teal-200/60 shrink-0">
               <Coffee className="w-5 h-5" />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h2 className="font-bold text-sm text-slate-900">{activeBusiness?.name || 'Kasir POS'}</h2>
+                <h2 className="font-bold text-sm text-slate-900">{activeBusiness?.name || 'Terserah'}</h2>
                 <span className="text-xs text-slate-400">• {activeBranch?.name || 'Cabang Utama'}</span>
               </div>
-              <div className="flex items-center gap-2 text-[11px] text-slate-500 font-medium">
+              <div className="flex items-center gap-2 text-[11px] text-slate-500 font-medium mt-0.5">
                 <span>{activeShift ? `Kasir: ${activeShift.cashierName}` : 'Kasir: Belum Buka Shift'}</span>
                 <span>•</span>
-                <span className="font-mono bg-slate-100 px-1.5 py-0.5 rounded text-slate-700">
+                <span className="font-mono bg-slate-100 px-1.5 py-0.5 rounded text-slate-700 font-bold">
                   {activeShift?.notes || '#SF-01'}
                 </span>
                 <span>•</span>
-                <span className="text-teal-700 font-semibold flex items-center gap-1">
+                <span className="text-emerald-700 font-semibold flex items-center gap-1.5">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
                   WIB Online
                 </span>
@@ -392,14 +393,16 @@ export function FnBPosScreen() {
           </div>
 
           {/* Quick Metrics */}
-          <div className="hidden xl:flex items-center gap-4 bg-slate-50 px-3.5 py-1.5 rounded-lg border border-slate-200/80 text-xs text-slate-600">
-            <div>
-              Meja Terisi: <strong suppressHydrationWarning className="text-slate-900">{tables.filter(t => t.status === 'occupied').length} / {tables.length}</strong>
+          <div className="hidden xl:flex items-center gap-4 bg-slate-50/90 px-4 py-2 rounded-xl border border-slate-200/80 text-xs text-slate-600">
+            <div className="flex items-center gap-1.5">
+              <span>Meja Terisi</span>
+              <strong suppressHydrationWarning className="text-slate-900">{tables.filter(t => t.status === 'occupied').length} / {tables.length}</strong>
+              <span className="text-slate-400 text-xs ml-0.5">&gt;</span>
             </div>
-            <div className="w-px h-3 bg-slate-300" />
-            <div className="flex items-center gap-1.5 text-teal-700 font-semibold">
-              <ChefHat className="w-3.5 h-3.5" />
-              <span>Dapur KDS Terhubung</span>
+            <div className="w-px h-3.5 bg-slate-300" />
+            <div className="flex items-center gap-1.5 text-emerald-700 font-bold">
+              <span>Dapur KDS</span>
+              <span className="text-emerald-600 font-semibold">Terhubung</span>
             </div>
           </div>
         </div>
@@ -407,19 +410,19 @@ export function FnBPosScreen() {
         {/* Action Buttons */}
         <div className="flex items-center gap-2.5">
           {/* Order Type Toggle */}
-          <div className="flex items-center bg-slate-100 p-1 rounded-lg border border-slate-200 text-xs font-semibold">
+          <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200/80 text-xs font-semibold">
             <button
               onClick={() => setOrderType('dine_in')}
-              className={`px-3 py-1.5 rounded-md transition-all ${
-                orderType === 'dine_in' ? 'bg-teal-600 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'
+              className={`px-3.5 py-1.5 rounded-lg transition-all ${
+                orderType === 'dine_in' ? 'bg-[#00897b] text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'
               }`}
             >
               Dine-in
             </button>
             <button
               onClick={() => setOrderType('takeaway')}
-              className={`px-3 py-1.5 rounded-md transition-all ${
-                orderType === 'takeaway' ? 'bg-teal-600 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'
+              className={`px-3.5 py-1.5 rounded-lg transition-all ${
+                orderType === 'takeaway' ? 'bg-[#00897b] text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'
               }`}
             >
               Takeaway
@@ -428,7 +431,7 @@ export function FnBPosScreen() {
 
           <Link
             href={`/app/${activeBusiness?.id}/fnb/kitchen`}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold transition-colors"
+            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-slate-50 hover:bg-slate-100 text-slate-700 text-xs font-semibold transition-colors border border-slate-200/70"
           >
             <ChefHat className="w-3.5 h-3.5 text-teal-600" />
             <span>KDS Dapur</span>
@@ -436,16 +439,16 @@ export function FnBPosScreen() {
 
           <button
             onClick={() => setShowShiftModal(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-teal-50 hover:bg-teal-100 text-teal-800 text-xs font-semibold border border-teal-200 transition-colors"
+            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-white hover:bg-emerald-50 text-emerald-700 text-xs font-semibold border border-emerald-300/80 transition-colors shadow-2xs"
           >
-            <Clock className="w-3.5 h-3.5" />
+            <Clock className="w-3.5 h-3.5 text-emerald-600" />
             <span>{activeShift ? 'Tutup Shift' : 'Buka Shift'}</span>
           </button>
 
           {activeShift && (
             <button
               onClick={() => setShowCashMovementModal(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold transition-colors"
+              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold transition-colors"
             >
               <ArrowDownLeft className="w-3.5 h-3.5 text-teal-600" />
               <span>Mutasi Kas</span>
@@ -455,26 +458,26 @@ export function FnBPosScreen() {
       </section>
 
       {/* 2. POS MAIN STAGE: Split Layout */}
-      <div className="grid grid-cols-12 gap-6 px-6 pb-8 items-start">
-        {/* LEFT 7 COLS: Catalog, Filters, Search & Grid */}
+      <div className="grid grid-cols-12 gap-5 items-start">
+        {/* LEFT 7-8 COLS: Catalog, Filters, Search & Grid */}
         <div className="col-span-12 lg:col-span-7 xl:col-span-8 flex flex-col gap-4">
           {/* Search & Active Table Bar */}
-          <div className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-xs flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-2.5 flex-1 min-w-[200px] bg-slate-100 px-3 py-2 rounded-xl text-slate-700">
+          <div className="bg-white p-3.5 rounded-2xl border border-slate-200/90 shadow-xs flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5 flex-1 min-w-[200px] bg-slate-100/80 px-3.5 py-2 rounded-xl text-slate-700">
               <Search className="w-4 h-4 text-slate-400" />
               <input
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Cari menu kopi, pastry, minuman..."
-                className="w-full bg-transparent border-0 outline-none text-xs text-slate-900 placeholder:text-slate-400"
+                className="w-full bg-transparent border-0 outline-none text-xs text-slate-900 placeholder:text-slate-400 font-medium"
               />
             </div>
 
             {orderType === 'dine_in' && (
               <button
                 onClick={() => setShowTableModal(true)}
-                className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-teal-50 text-teal-800 border border-teal-200 hover:bg-teal-100 transition-colors text-xs font-semibold"
+                className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-teal-50/80 text-teal-800 border border-teal-200 hover:bg-teal-100 transition-colors text-xs font-semibold"
               >
                 <UtensilsCrossed className="w-3.5 h-3.5 text-teal-600" />
                 <span>Pilih Meja: <strong>{selectedTable}</strong></span>
@@ -490,98 +493,152 @@ export function FnBPosScreen() {
                 onClick={() => setSelectedCategory(cat)}
                 className={`px-4 py-2 rounded-full text-xs font-semibold whitespace-nowrap transition-all shadow-xs ${
                   selectedCategory === cat
-                    ? 'bg-teal-600 text-white'
-                    : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+                    ? 'bg-[#00897b] text-white shadow-sm'
+                    : 'bg-white text-slate-600 hover:bg-slate-50 border border-slate-200/90'
                 }`}
               >
                 {cat}
               </button>
             ))}
+            <button
+              title="Kategori Lainnya"
+              className="p-2 rounded-full bg-white border border-slate-200/90 text-slate-400 hover:text-slate-700 hover:bg-slate-50 transition-colors shrink-0 shadow-xs"
+            >
+              <ChevronRight className="w-3.5 h-3.5" />
+            </button>
+            <button
+              title="Filter Menu"
+              className="flex items-center gap-1.5 px-3.5 py-2 rounded-full bg-white border border-slate-200/90 text-slate-600 hover:text-slate-900 hover:bg-slate-50 transition-colors text-xs font-semibold shrink-0 shadow-xs ml-auto"
+            >
+              <SlidersHorizontal className="w-3.5 h-3.5 text-slate-500" />
+              <span>Filter</span>
+            </button>
           </div>
 
-          {/* Menu Grid */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-4">
-            {filteredProducts.map((prod) => (
-              <div
-                key={prod.id}
-                onClick={() => handleProductClick(prod)}
-                className="bg-white rounded-2xl border border-slate-200 shadow-xs hover:shadow-md transition-all cursor-pointer flex flex-col overflow-hidden group active:scale-[0.98]"
-              >
-                <div className="relative h-28 w-full bg-slate-100 overflow-hidden">
-                  {prod.imageUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={prod.imageUrl}
-                      alt={prod.name}
-                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                    />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center text-slate-400">
-                      <Coffee className="w-8 h-8" />
-                    </div>
-                  )}
-                  {((prod.options && prod.options.length > 0) || (prod.modifiers && prod.modifiers.length > 0)) && (
-                    <span className="absolute top-2 left-2 px-1.5 py-0.5 rounded bg-teal-800/90 text-white font-bold text-[9px] uppercase tracking-wider">
-                      Varian / Topping
-                    </span>
-                  )}
-                </div>
+          {/* Menu Grid - 5 Columns on Desktop */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-3.5">
+            {filteredProducts.map((prod, idx) => {
+              const isBestSeller = prod.tag === 'best_seller' || idx === 0;
+              const isNew = prod.tag === 'new' || idx === 3;
 
-                <div className="p-3 flex flex-col flex-1 justify-between gap-2">
-                  <div>
-                    <h3 className="font-semibold text-xs text-slate-900 group-hover:text-teal-700 transition-colors line-clamp-1">
-                      {prod.name}
-                    </h3>
-                    <p className="text-[10px] text-slate-400 line-clamp-1 mt-0.5">
-                      {prod.category} • Stok: {prod.stockQty}
-                    </p>
+              return (
+                <div
+                  key={prod.id}
+                  onClick={() => handleProductClick(prod)}
+                  className="bg-white rounded-2xl border border-slate-200/90 shadow-xs hover:shadow-md transition-all cursor-pointer flex flex-col overflow-hidden group active:scale-[0.98]"
+                >
+                  <div className="relative aspect-[4/3] w-full bg-slate-100 overflow-hidden">
+                    {prod.imageUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={prod.imageUrl}
+                        alt={prod.name}
+                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center text-slate-400">
+                        <Coffee className="w-8 h-8" />
+                      </div>
+                    )}
+
+                    {/* Promotional Badges matching reference screenshot */}
+                    {isBestSeller && (
+                      <span className="absolute top-2 left-2 px-2 py-0.5 rounded-full bg-amber-500 text-white font-bold text-[9px] uppercase tracking-wider shadow-xs">
+                        Best Seller
+                      </span>
+                    )}
+                    {isNew && !isBestSeller && (
+                      <span className="absolute top-2 right-2 px-2 py-0.5 rounded-full bg-emerald-600 text-white font-bold text-[9px] uppercase tracking-wider shadow-xs">
+                        Baru
+                      </span>
+                    )}
+
+                    {((prod.options && prod.options.length > 0) || (prod.modifiers && prod.modifiers.length > 0)) && !isBestSeller && !isNew && (
+                      <span className="absolute top-2 left-2 px-1.5 py-0.5 rounded bg-teal-800/90 text-white font-bold text-[9px] uppercase tracking-wider shadow-xs">
+                        Custom
+                      </span>
+                    )}
                   </div>
 
-                  <div className="flex items-center justify-between pt-1">
-                    <span className="font-bold text-xs text-slate-900 tabular-nums">
-                      {formatRupiah(prod.sellingPrice)}
-                    </span>
+                  <div className="p-3 flex flex-col flex-1 justify-between gap-1.5">
+                    <div>
+                      <h3 className="font-bold text-xs text-slate-900 group-hover:text-teal-700 transition-colors line-clamp-1">
+                        {prod.name}
+                      </h3>
+                      <p className="text-[11px] font-semibold text-slate-500 mt-0.5 tabular-nums">
+                        {formatRupiah(prod.sellingPrice)}
+                      </p>
+                    </div>
+
                     <button
                       type="button"
-                      className="w-7 h-7 rounded-lg bg-teal-50 text-teal-700 hover:bg-teal-600 hover:text-white flex items-center justify-center transition-colors"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleProductClick(prod);
+                      }}
+                      className="w-full mt-1.5 py-1.5 px-3 rounded-xl border border-teal-500/80 text-teal-700 bg-teal-50/40 hover:bg-teal-600 hover:text-white font-bold text-xs flex items-center justify-center gap-1.5 transition-all shadow-2xs"
                     >
                       <Plus className="w-3.5 h-3.5" />
+                      <span>Tambah</span>
                     </button>
                   </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
 
-        {/* RIGHT 5 COLS: Active Cart / Order Slip Inspector */}
-        <div className="col-span-12 lg:col-span-5 xl:col-span-4 bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col sticky top-36 overflow-hidden">
+        {/* RIGHT 4-5 COLS: Active Cart / Order Slip Inspector */}
+        <div className="col-span-12 lg:col-span-5 xl:col-span-4 bg-white rounded-2xl border border-slate-200/90 shadow-sm flex flex-col sticky top-20 overflow-hidden">
           {/* Cart Header */}
-          <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/60">
-            <div>
+          <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/70">
+            <div className="flex items-center gap-2">
               <h3 className="font-bold text-sm text-slate-900">Pesanan Aktif</h3>
-              <div className="text-[11px] text-slate-500 flex items-center gap-2 mt-0.5">
-                <span className="capitalize font-semibold text-teal-700">{orderType.replace('_', ' ')}</span>
-                {orderType === 'dine_in' && <span>• {selectedTable}</span>}
-              </div>
+              <span className="text-[11px] font-semibold text-teal-800 bg-teal-50 border border-teal-200 px-2 py-0.5 rounded-md capitalize">
+                {orderType === 'dine_in' ? 'Dine In' : 'Takeaway'}
+              </span>
+              {orderType === 'dine_in' && (
+                <span className="text-[11px] font-semibold text-slate-700 bg-slate-100 px-2 py-0.5 rounded-md">
+                  {selectedTable}
+                </span>
+              )}
             </div>
-            {cart.length > 0 && (
+
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1 text-[11px] text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded font-medium">
+                <Users className="w-3 h-3 text-slate-400" />
+                <span>1</span>
+              </div>
+              {cart.length > 0 && (
+                <button
+                  onClick={clearCart}
+                  className="text-[11px] text-slate-500 hover:text-rose-600 flex items-center gap-1 font-medium px-1.5 py-0.5 rounded hover:bg-rose-50 transition-colors"
+                  title="Hapus Pesanan"
+                >
+                  <Trash2 className="w-3 h-3" />
+                  <span>Hapus</span>
+                </button>
+              )}
               <button
-                onClick={clearCart}
-                className="text-[11px] text-rose-600 hover:underline flex items-center gap-1 font-medium"
+                className="text-slate-400 hover:text-slate-700 p-1 rounded hover:bg-slate-100 transition-colors"
+                title="Opsi Lainnya"
               >
-                <Trash2 className="w-3 h-3" />
-                <span>Batal</span>
+                <MoreHorizontal className="w-4 h-4" />
               </button>
-            )}
+            </div>
           </div>
 
           {/* Cart Items List with independent variant rows */}
-          <div className="p-4 flex flex-col gap-3 max-h-[360px] overflow-y-auto divide-y divide-slate-100">
+          <div className="p-4 flex flex-col gap-3 min-h-[260px] max-h-[380px] overflow-y-auto divide-y divide-slate-100">
             {cart.length === 0 ? (
-              <div className="py-12 text-center text-slate-400 flex flex-col items-center gap-2">
-                <Coffee className="w-10 h-10 stroke-1 text-slate-300" />
-                <span className="text-xs">Keranjang masih kosong. Pilih menu di sebelah kiri.</span>
+              <div className="py-16 text-center text-slate-400 flex flex-col items-center justify-center gap-2 my-auto">
+                <div className="w-16 h-16 rounded-full bg-teal-50/80 text-teal-600 flex items-center justify-center border border-teal-100 mb-1">
+                  <Coffee className="w-8 h-8 stroke-1 text-teal-500" />
+                </div>
+                <h4 className="font-bold text-sm text-slate-800">Keranjang masih kosong</h4>
+                <p className="text-xs text-slate-400 max-w-[210px] text-center leading-relaxed">
+                  Pilih menu dari sebelah kiri untuk mulai menambahkan pesanan.
+                </p>
               </div>
             ) : (
               cart.map((item, idx) => (
@@ -611,7 +668,7 @@ export function FnBPosScreen() {
                   </div>
 
                   {/* Quantity Stepper */}
-                  <div className="flex items-center gap-2 bg-slate-100 rounded-lg p-1 shrink-0">
+                  <div className="flex items-center gap-1.5 bg-slate-100 rounded-lg p-1 shrink-0">
                     <button
                       type="button"
                       onClick={() => updateQuantityByIndex(idx, -1)}
@@ -649,7 +706,7 @@ export function FnBPosScreen() {
           </div>
 
           {/* Price Breakdown & Action Buttons */}
-          <div className="p-4 bg-slate-50/80 border-t border-slate-100 flex flex-col gap-2">
+          <div className="p-4 bg-slate-50/90 border-t border-slate-100 flex flex-col gap-2">
             {orderFeedbackMsg && (
               <div className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-[11px] font-semibold flex items-center gap-2">
                 <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
@@ -659,37 +716,26 @@ export function FnBPosScreen() {
 
             <div className="flex items-center justify-between text-xs text-slate-600">
               <span>Subtotal</span>
-              <span className="tabular-nums font-medium">{formatRupiah(subtotal)}</span>
+              <span className="tabular-nums font-semibold">{formatRupiah(subtotal)}</span>
             </div>
             {taxRate > 0 && (
               <div className="flex items-center justify-between text-xs text-slate-600">
                 <span>Pajak Resto (PB1 {taxRate}%)</span>
-                <span className="tabular-nums font-medium">{formatRupiah(tax)}</span>
+                <span className="tabular-nums font-semibold">{formatRupiah(tax)}</span>
               </div>
             )}
             {serviceChargeRate > 0 && (
               <div className="flex items-center justify-between text-xs text-slate-600">
                 <span>Service Charge ({serviceChargeRate}%)</span>
-                <span className="tabular-nums font-medium">{formatRupiah(serviceCharge)}</span>
+                <span className="tabular-nums font-semibold">{formatRupiah(serviceCharge)}</span>
               </div>
             )}
             <div className="flex items-center justify-between text-base font-bold text-slate-900 pt-2 border-t border-slate-200">
-              <span>Total Tagihan</span>
-              <span className="text-teal-700 tabular-nums text-lg">{formatRupiah(grandTotal)}</span>
+              <span className="text-sm font-bold text-slate-900">Total Tagihan</span>
+              <span className="text-[#00c49f] font-black text-xl tabular-nums">{formatRupiah(grandTotal)}</span>
             </div>
 
-            <div className="grid grid-cols-2 gap-2 mt-3">
-              {orderType === 'dine_in' && (
-                <button
-                  type="button"
-                  onClick={handleOpenOrder}
-                  disabled={cart.length === 0 || isOpenOrderProcessing}
-                  className="py-3 px-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-sm transition-all flex items-center justify-center gap-1.5 disabled:opacity-40"
-                >
-                  <ChefHat className="w-4 h-4 text-teal-400" />
-                  <span>{isOpenOrderProcessing ? 'Mengirim...' : 'Kirim ke KDS'}</span>
-                </button>
-              )}
+            <div className="flex flex-col gap-2 mt-2">
               <button
                 type="button"
                 onClick={() => {
@@ -697,11 +743,24 @@ export function FnBPosScreen() {
                   setShowPaymentModal(true);
                 }}
                 disabled={cart.length === 0}
-                className={`${orderType === 'dine_in' ? 'col-span-1' : 'col-span-2'} py-3 px-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs shadow-md shadow-teal-900/30 transition-all flex items-center justify-center gap-1.5 disabled:opacity-40`}
+                className="w-full py-3.5 px-4 rounded-xl bg-[#00c49f] hover:bg-[#00b290] text-slate-950 font-black text-sm flex items-center justify-center gap-2 shadow-md shadow-teal-500/20 active:scale-[0.98] transition-all disabled:opacity-40"
               >
-                <Banknote className="w-4 h-4" />
-                <span>Bayar ({formatRupiah(grandTotal)})</span>
+                <CreditCard className="w-4 h-4 text-slate-950" />
+                <span>Bayar Sekarang ({formatRupiah(grandTotal)})</span>
+                <ChevronRight className="w-4 h-4 ml-1" />
               </button>
+
+              {orderType === 'dine_in' && (
+                <button
+                  type="button"
+                  onClick={handleOpenOrder}
+                  disabled={cart.length === 0 || isOpenOrderProcessing}
+                  className="py-2.5 px-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-xs transition-all flex items-center justify-center gap-1.5 disabled:opacity-40"
+                >
+                  <ChefHat className="w-3.5 h-3.5 text-teal-400" />
+                  <span>{isOpenOrderProcessing ? 'Mengirim...' : 'Kirim Pesanan ke KDS Dapur'}</span>
+                </button>
+              )}
             </div>
           </div>
         </div>

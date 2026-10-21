@@ -164,8 +164,8 @@ export const MODULE_REGISTRY: Record<string, BusinessModule> = {
 
 export const DEFAULT_MODULES_BY_TYPE: Record<BusinessType, string[]> = {
   fnb: [
-    'core.dashboard',
     'core.pos',
+    'core.dashboard',
     'fnb.tables',
     'fnb.kitchen',
     'core.products',
@@ -176,8 +176,8 @@ export const DEFAULT_MODULES_BY_TYPE: Record<BusinessType, string[]> = {
     'core.settings',
   ],
   phone: [
-    'core.dashboard',
     'core.pos',
+    'core.dashboard',
     'phone.imei',
     'phone.sellin',
     'phone.exchange',
@@ -188,8 +188,8 @@ export const DEFAULT_MODULES_BY_TYPE: Record<BusinessType, string[]> = {
     'core.settings',
   ],
   retail: [
-    'core.dashboard',
     'core.pos',
+    'core.dashboard',
     'retail.barcode',
     'core.products',
     'core.inventory',

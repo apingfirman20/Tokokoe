@@ -2,7 +2,9 @@
 
 import React from 'react';
 import Link from 'next/link';
+import { useParams } from 'next/navigation';
 import { useBusiness } from '@/context/BusinessContext';
+import { INITIAL_BUSINESSES } from '@/lib/data/seed-data';
 import { formatRupiah } from '@/lib/utils';
 import { 
   TrendingUp, CircleDollarSign, Package, Users, 
@@ -11,8 +13,17 @@ import {
 } from 'lucide-react';
 
 export default function DashboardPage() {
-  const { activeBusiness, activeBranch, sales, products, activeShift, tables, imeiUnits } = useBusiness();
-  const businessId = activeBusiness?.id || 'biz_kopi_senja';
+  const params = useParams();
+  const routeBusinessId = params?.businessId as string;
+  const { activeBusiness, activeBranch, sales, products, activeShift, tables, imeiUnits, businesses } = useBusiness();
+  
+  const currentBiz = 
+    (routeBusinessId ? businesses.find(b => b.id === routeBusinessId) : null) || 
+    activeBusiness || 
+    INITIAL_BUSINESSES.find(b => b.id === routeBusinessId) || 
+    INITIAL_BUSINESSES[0];
+
+  const businessId = currentBiz?.id || routeBusinessId || 'biz_kopi_senja';
 
   // Metrics calculation: only settled paid sales count as verified revenue
   const businessSales = sales.filter(s => s.businessId === businessId);
@@ -31,10 +42,10 @@ export default function DashboardPage() {
         <div>
           <div className="flex items-center gap-2">
             <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
-              {activeBusiness?.name || 'Dashboard'}
+              {currentBiz?.name || 'Dashboard'}
             </h1>
-            <span className="text-xs bg-teal-100 text-teal-800 font-semibold px-2.5 py-0.5 rounded-full border border-teal-200 uppercase">
-              {activeBusiness?.businessType}
+            <span className="text-xs bg-[#00c49f]/10 text-emerald-800 font-bold px-2.5 py-0.5 rounded-full border border-[#00c49f]/30 uppercase">
+              {currentBiz?.businessType}
             </span>
           </div>
           <p className="text-xs text-slate-500 mt-1">
@@ -45,7 +56,7 @@ export default function DashboardPage() {
         <div className="flex items-center gap-2.5">
           <Link
             href={`/app/${businessId}/pos`}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-semibold text-xs shadow-sm transition-all"
+            className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#008f7a] hover:bg-[#007b68] text-white font-semibold text-xs shadow-sm transition-all"
           >
             <CircleDollarSign className="w-4 h-4" />
             <span>Buka Kasir POS</span>

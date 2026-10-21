@@ -134,6 +134,7 @@ export interface Product {
   recipe?: RecipeItem[]; // Recipe / Bill of Materials (BOM)
   options?: ProductOption[];
   modifiers?: ProductModifier[];
+  tag?: 'best_seller' | 'new' | string;
   // Phone store specific
   brand?: string;
   model?: string;
