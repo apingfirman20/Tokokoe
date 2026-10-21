@@ -135,6 +135,14 @@
     line-height: 1.2 !important;
   }
 
+  #thermal-receipt-area img {
+    max-height: 48px !important;
+    max-width: 140px !important;
+    filter: grayscale(100%) contrast(150%) !important;
+    display: block !important;
+    margin: 0 auto 4px auto !important;
+  }
+
   @page {
     margin: 0;
     size: auto;

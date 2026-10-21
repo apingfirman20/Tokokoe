@@ -41,6 +41,21 @@ export interface UserProfile {
   createdAt: number;
 }
 
+export interface ReceiptSettings {
+  showLogo?: boolean;
+  logoUrl?: string;
+  storeName?: string;
+  address?: string;
+  phone?: string;
+  tagline?: string;
+  footerMessage?: string;
+  footerNotes?: string;
+  showCashier?: boolean;
+  showCustomer?: boolean;
+  showTax?: boolean;
+  paperSize?: '80mm' | '58mm';
+}
+
 export interface Business {
   id: string;
   name: string;
@@ -55,6 +70,8 @@ export interface Business {
   status: 'active' | 'suspended' | 'inactive';
   taxRate?: number; // e.g. 10 for 10% PB1
   serviceChargeRate?: number; // e.g. 5 for 5%
+  categories?: string[];
+  receiptSettings?: ReceiptSettings;
   createdAt: number;
   updatedAt: number;
 }
