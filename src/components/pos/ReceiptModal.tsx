@@ -845,7 +845,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                 </div>
               )}
 
-              {sale.changeAmount > 0 && (
+              {sale.paidAmount > 0 && sale.changeAmount !== undefined && (
                 <div className="flex justify-between font-medium">
                   <span>Kembalian:</span>
                   <span className="tabular-nums">{formatRupiah(sale.changeAmount)}</span>

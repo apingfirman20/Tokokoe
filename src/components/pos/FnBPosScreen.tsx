@@ -69,11 +69,26 @@ export function FnBPosScreen() {
   const [showIncomingOrdersModal, setShowIncomingOrdersModal] = useState(false);
   const [forwardingSaleId, setForwardingSaleId] = useState<string | null>(null);
 
+  // Dedicated Cash Payment Modal state for table self-orders / open bills
+  const [payingOrder, setPayingOrder] = useState<Sale | null>(null);
+  const [orderCashAmount, setOrderCashAmount] = useState<number>(0);
+  const [orderPaymentError, setOrderPaymentError] = useState<string>('');
+
   const incomingSelfOrders = React.useMemo(() => {
     return (sales || []).filter(
       s => s.businessId === activeBusiness?.id && s.orderStatus === 'waiting_cashier'
     );
   }, [sales, activeBusiness?.id]);
+
+  // Find active unpaid order for the currently selected table
+  const selectedTableUnpaidSale = React.useMemo(() => {
+    if (!selectedTable) return null;
+    return (sales || []).find(
+      s => s.businessId === activeBusiness?.id && 
+           s.tableNumber === selectedTable && 
+           s.paymentStatus === 'pending'
+    );
+  }, [sales, activeBusiness?.id, selectedTable]);
 
   // Audio notification when new customer QR order arrives
   const prevIncomingCountRef = React.useRef(incomingSelfOrders.length);
@@ -88,7 +103,7 @@ export function FnBPosScreen() {
     setForwardingSaleId(sale.id);
     try {
       if (markAsPaid) {
-        await updateOrderStatus(sale.id, 'new', 'paid', sale.grandTotal);
+        await updateOrderStatus(sale.id, 'new', 'paid', sale.grandTotal, 0);
       } else {
         await updateOrderStatus(sale.id, 'new');
       }
@@ -100,6 +115,47 @@ export function FnBPosScreen() {
       }
     } catch (err: any) {
       alert(err.message || 'Gagal meneruskan pesanan ke dapur.');
+    } finally {
+      setForwardingSaleId(null);
+    }
+  };
+
+  // Process cash payment with change calculation & receipt modal for table order
+  const handleExecuteCashPaymentForOrder = async () => {
+    if (!payingOrder) return;
+    if (orderCashAmount < payingOrder.grandTotal) {
+      setOrderPaymentError(`Uang tunai kurang ${formatRupiah(payingOrder.grandTotal - orderCashAmount)}.`);
+      return;
+    }
+
+    setForwardingSaleId(payingOrder.id);
+    setOrderPaymentError('');
+    try {
+      const change = Math.max(0, orderCashAmount - payingOrder.grandTotal);
+      const newKitchenStatus = payingOrder.orderStatus === 'waiting_cashier' ? 'new' : payingOrder.orderStatus;
+      
+      // Update order status and paymentStatus to 'paid' with paidAmount & changeAmount
+      await updateOrderStatus(payingOrder.id, newKitchenStatus, 'paid', orderCashAmount, change);
+
+      const completedSale: Sale = {
+        ...payingOrder,
+        paidAmount: orderCashAmount,
+        changeAmount: change,
+        paymentMethod: 'cash',
+        paymentStatus: 'paid',
+        orderStatus: newKitchenStatus,
+        updatedAt: Date.now(),
+      };
+
+      playPosSound('checkout_success');
+      setLastSale(completedSale);
+      setPayingOrder(null);
+      setShowIncomingOrdersModal(false);
+      setShowReceiptModal(true); // Automatically show cashier receipt modal for printing!
+      setOrderFeedbackMsg(`✓ Pembayaran tunai ${payingOrder.tableNumber || ''} (${payingOrder.customerName || 'Tamu'}) berhasil! Kembalian: ${formatRupiah(change)}. Pesanan diteruskan ke Dapur 👨‍🍳`);
+      setTimeout(() => setOrderFeedbackMsg(''), 5000);
+    } catch (err: any) {
+      setOrderPaymentError(err.message || 'Gagal memproses pembayaran kasir.');
     } finally {
       setForwardingSaleId(null);
     }
@@ -716,7 +772,62 @@ export function FnBPosScreen() {
 
           {/* Cart Items List with independent variant rows */}
           <div className="p-4 flex flex-col gap-3 min-h-[260px] max-h-[380px] overflow-y-auto divide-y divide-slate-100">
-            {cart.length === 0 ? (
+            {selectedTableUnpaidSale && cart.length === 0 ? (
+              <div className="p-4 rounded-2xl bg-gradient-to-br from-amber-50 to-orange-50 border-2 border-amber-300 shadow-xs space-y-3 my-auto">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="px-2.5 py-1 rounded-lg bg-amber-500 text-white font-black text-xs">
+                      {selectedTableUnpaidSale.tableNumber}
+                    </span>
+                    <span className="font-extrabold text-xs text-slate-800">
+                      {selectedTableUnpaidSale.customerName || 'Tamu Restoran'}
+                    </span>
+                  </div>
+                  <span className="text-[10px] bg-amber-100 text-amber-900 border border-amber-300 font-extrabold px-2 py-0.5 rounded-full">
+                    Belum Lunas (Unpaid)
+                  </span>
+                </div>
+
+                <div className="text-xs text-slate-600 space-y-1">
+                  <div className="flex justify-between">
+                    <span>No. Nota:</span>
+                    <span className="font-mono font-bold text-slate-800">{selectedTableUnpaidSale.saleNumber}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Status Dapur:</span>
+                    <span className="font-bold capitalize text-slate-800">
+                      {selectedTableUnpaidSale.orderStatus === 'waiting_cashier' ? 'Menunggu Kasir' :
+                       selectedTableUnpaidSale.orderStatus === 'new' ? 'Antrean Dapur' :
+                       selectedTableUnpaidSale.orderStatus === 'preparing' ? 'Sedang Dimasak' :
+                       selectedTableUnpaidSale.orderStatus === 'ready' ? 'Siap Saji' : selectedTableUnpaidSale.orderStatus}
+                    </span>
+                  </div>
+                  <div className="text-[11px] text-slate-500 pt-1">
+                    {selectedTableUnpaidSale.lineItems.length} menu: {selectedTableUnpaidSale.lineItems.map(i => `${i.quantity}x ${i.productName}`).join(', ')}
+                  </div>
+                </div>
+
+                <div className="pt-2 border-t border-amber-200/80 flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-700">Total Tagihan:</span>
+                  <span className="text-lg font-black text-slate-900 tabular-nums">
+                    {formatRupiah(selectedTableUnpaidSale.grandTotal)}
+                  </span>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPayingOrder(selectedTableUnpaidSale);
+                    setOrderCashAmount(selectedTableUnpaidSale.grandTotal);
+                    setOrderPaymentError('');
+                  }}
+                  className="w-full py-2.5 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs shadow-md shadow-emerald-600/20 flex items-center justify-center gap-1.5 active:scale-95 transition-all"
+                >
+                  <Banknote className="w-4 h-4" />
+                  <span>Bayar Kasir Tunai Meja Ini 💵</span>
+                </button>
+              </div>
+            ) : cart.length === 0 ? (
               <div className="py-16 text-center text-slate-400 flex flex-col items-center justify-center gap-2 my-auto">
                 <div className="w-16 h-16 rounded-full bg-teal-50/80 text-teal-600 flex items-center justify-center border border-teal-100 mb-1">
                   <Coffee className="w-8 h-8 stroke-1 text-teal-500" />
@@ -1687,12 +1798,16 @@ export function FnBPosScreen() {
                             <button
                               type="button"
                               disabled={isProcessingThis}
-                              onClick={() => handleForwardToKitchen(order, true)}
-                              className="py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs transition-all flex items-center gap-1.5 active:scale-95 disabled:opacity-50"
-                              title="Terima pembayaran tunai langsung di kasir dan kirim ke dapur"
+                              onClick={() => {
+                                setPayingOrder(order);
+                                setOrderCashAmount(order.grandTotal);
+                                setOrderPaymentError('');
+                              }}
+                              className="py-2 px-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs shadow-md shadow-emerald-600/20 transition-all flex items-center gap-1.5 active:scale-95 disabled:opacity-50"
+                              title="Terima uang tunai dan hitung kembalian di kasir"
                             >
-                              <Banknote className="w-3.5 h-3.5" />
-                              <span>Terima Tunai (Lunas) &amp; Kirim Dapur</span>
+                              <Banknote className="w-4 h-4" />
+                              <span>Bayar Kasir Tunai 💵</span>
                             </button>
                           )}
 
@@ -1700,10 +1815,10 @@ export function FnBPosScreen() {
                             type="button"
                             disabled={isProcessingThis}
                             onClick={() => handleForwardToKitchen(order, false)}
-                            className="py-2 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-md transition-all flex items-center gap-1.5 active:scale-95 disabled:opacity-50"
+                            className="py-2 px-3.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-md transition-all flex items-center gap-1.5 active:scale-95 disabled:opacity-50"
                           >
                             <ChefHat className="w-3.5 h-3.5 text-teal-400" />
-                            <span>{isProcessingThis ? 'Meneruskan...' : 'Teruskan ke Dapur 👨‍🍳'}</span>
+                            <span>{isProcessingThis ? 'Meneruskan...' : isQris ? 'Teruskan ke Dapur 👨‍🍳' : 'Kirim Dapur Dulu (Bayar Nanti) 👨‍🍳'}</span>
                           </button>
                         </div>
                       </div>
@@ -1720,6 +1835,168 @@ export function FnBPosScreen() {
                 className="py-1.5 px-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold"
               >
                 Tutup
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 7. DEDICATED CASH PAYMENT MODAL FOR TABLE ORDERS (WITH CASH RECEIVED & LIVE CHANGE) */}
+      {payingOrder && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-[60] p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 animate-in zoom-in-95">
+            <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-2xl bg-emerald-100 text-emerald-700 flex items-center justify-center shadow-xs">
+                  <Banknote className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-base text-slate-900">Pembayaran Kasir Tunai</h3>
+                  <p className="text-xs text-slate-500 font-medium">
+                    {payingOrder.tableNumber || 'Meja'} • {payingOrder.customerName || 'Tamu'}
+                  </p>
+                </div>
+              </div>
+              <button 
+                onClick={() => { setPayingOrder(null); setOrderPaymentError(''); }} 
+                className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {orderPaymentError && (
+              <div className="mb-4 p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-semibold">
+                {orderPaymentError}
+              </div>
+            )}
+
+            {/* Ringkasan Item Pesanan */}
+            <div className="bg-slate-50/80 p-3 rounded-2xl border border-slate-200/80 mb-4 max-h-36 overflow-y-auto space-y-1.5">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">
+                Rincian Pesanan ({payingOrder.lineItems.length} menu)
+              </div>
+              {payingOrder.lineItems.map((item, idx) => (
+                <div key={idx} className="flex justify-between items-center text-xs text-slate-700">
+                  <span className="truncate pr-2">
+                    <span className="font-bold text-slate-900">{item.quantity}x</span> {item.productName}
+                    {item.selectedOptions && Object.keys(item.selectedOptions).length > 0 && (
+                      <span className="text-[10px] text-teal-600 ml-1">
+                        ({Object.values(item.selectedOptions).join(', ')})
+                      </span>
+                    )}
+                  </span>
+                  <span className="font-semibold tabular-nums shrink-0 text-slate-900">
+                    {formatRupiah(item.subtotal)}
+                  </span>
+                </div>
+              ))}
+            </div>
+
+            {/* Total Tagihan */}
+            <div className="bg-emerald-500/10 p-4 rounded-2xl mb-4 text-center border border-emerald-200">
+              <span className="text-[11px] text-emerald-800 uppercase font-black tracking-wider">Total Tagihan</span>
+              <div className="text-2xl font-black text-slate-900 mt-0.5 tabular-nums">
+                {formatRupiah(payingOrder.grandTotal)}
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                  Uang Diterima dari Pelanggan (Rp) <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  value={orderCashAmount || ''}
+                  onChange={(e) => {
+                    setOrderCashAmount(Number(e.target.value));
+                    setOrderPaymentError('');
+                  }}
+                  placeholder="0"
+                  autoFocus
+                  className="w-full bg-white text-xl font-black text-slate-900 px-4 py-3 rounded-2xl border-2 border-slate-300 focus:border-emerald-500 outline-none tabular-nums"
+                />
+              </div>
+
+              {/* Preset Denominations Rupiah */}
+              <div className="grid grid-cols-3 gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOrderCashAmount(payingOrder.grandTotal);
+                    setOrderPaymentError('');
+                  }}
+                  className="py-2.5 rounded-xl bg-emerald-100 hover:bg-emerald-200 text-emerald-900 text-xs font-extrabold border border-emerald-300 transition-all active:scale-95"
+                >
+                  Uang Pas
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const val = Math.ceil(payingOrder.grandTotal / 50000) * 50000 || 50000;
+                    setOrderCashAmount(val);
+                    setOrderPaymentError('');
+                  }}
+                  className="py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold transition-all active:scale-95"
+                >
+                  {formatRupiah(Math.ceil(payingOrder.grandTotal / 50000) * 50000 || 50000)}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const val = Math.ceil(payingOrder.grandTotal / 100000) * 100000 || 100000;
+                    setOrderCashAmount(val);
+                    setOrderPaymentError('');
+                  }}
+                  className="py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold transition-all active:scale-95"
+                >
+                  {formatRupiah(Math.ceil(payingOrder.grandTotal / 100000) * 100000 || 100000)}
+                </button>
+              </div>
+
+              {/* Kembalian Box */}
+              <div className={`p-3.5 rounded-2xl border flex items-center justify-between transition-all ${
+                orderCashAmount >= payingOrder.grandTotal
+                  ? 'bg-emerald-500/10 border-emerald-300 text-emerald-900'
+                  : 'bg-amber-50 border-amber-200 text-amber-900'
+              }`}>
+                <div>
+                  <span className="text-xs font-bold block">
+                    {orderCashAmount >= payingOrder.grandTotal ? 'Kembalian:' : 'Kekurangan Uang:'}
+                  </span>
+                  <span className="text-[10px] text-slate-500">
+                    {orderCashAmount >= payingOrder.grandTotal ? 'Diberikan ke pelanggan' : 'Uang tunai belum cukup'}
+                  </span>
+                </div>
+                <span className={`text-xl font-black tabular-nums ${
+                  orderCashAmount >= payingOrder.grandTotal ? 'text-emerald-700' : 'text-amber-700'
+                }`}>
+                  {orderCashAmount >= payingOrder.grandTotal
+                    ? formatRupiah(orderCashAmount - payingOrder.grandTotal)
+                    : formatRupiah(payingOrder.grandTotal - orderCashAmount)}
+                </span>
+              </div>
+
+              {/* Submit Button */}
+              <button
+                type="button"
+                onClick={handleExecuteCashPaymentForOrder}
+                disabled={Boolean(forwardingSaleId) || orderCashAmount < payingOrder.grandTotal}
+                className="w-full py-3.5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-extrabold text-sm shadow-lg shadow-emerald-600/20 transition-all flex items-center justify-center gap-2 active:scale-98"
+              >
+                {forwardingSaleId ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    <span>Memproses Pembayaran...</span>
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>Selesaikan &amp; Cetak Struk 🖨️</span>
+                  </>
+                )}
               </button>
             </div>
           </div>
