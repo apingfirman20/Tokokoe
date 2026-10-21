@@ -89,7 +89,9 @@ export function FnBPosScreen() {
   }, [tables, selectedTableId]);
 
   // Filter products by category & search (excluding archived/inactive)
-  const categories = ['Semua', 'Coffee Base', 'Non-Coffee', 'Signature', 'Pastry & Bakery', 'Makanan Berat'];
+  const defaultFnBCategories = ['Makanan', 'Minuman', 'Dessert', 'Coffee Base', 'Non-Coffee', 'Signature', 'Pastry & Bakery', 'Makanan Berat'];
+  const productCategories = Array.from(new Set(products.filter(p => p.isActive !== false).map(p => p.category).filter(Boolean)));
+  const categories = ['Semua', ...Array.from(new Set([...defaultFnBCategories, ...productCategories]))];
   const filteredProducts = products.filter(p => {
     if (p.isActive === false || p.available === false) return false;
     const matchCategory = selectedCategory === 'Semua' || p.category === selectedCategory;
