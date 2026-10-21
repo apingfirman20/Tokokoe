@@ -752,13 +752,31 @@ export async function POST(request: Request) {
       let snapToken = `snap_sim_${saleId}`;
       let snapRedirectUrl = `https://app.sandbox.midtrans.com/snap/v2/vtweb/${snapToken}`;
       
-      if (midtransAdapter.isConfigured()) {
+      let bizMidtransServerKey: string | undefined;
+      let bizIsProd: boolean | undefined;
+
+      try {
+        const bizSnap = await adminDb.doc(`businesses/${payload.businessId}`).get();
+        if (bizSnap.exists) {
+          const bizData = bizSnap.data() as any;
+          if (bizData?.midtransSettings?.serverKey) {
+            bizMidtransServerKey = bizData.midtransSettings.serverKey;
+            bizIsProd = bizData.midtransSettings.isProduction;
+          }
+        }
+      } catch (e) {
+        // fallback
+      }
+
+      if (midtransAdapter.isConfigured(bizMidtransServerKey)) {
         try {
           const snapRes = await midtransAdapter.createSnapTransaction({
             orderId: midtransOrderId!,
             grossAmount: (newSale as Sale).grandTotal,
             businessId: payload.businessId,
             customerName: payload.customerName || "Pelanggan POS",
+            serverKey: bizMidtransServerKey,
+            isProduction: bizIsProd,
           });
           if (snapRes.token) {
             snapToken = snapRes.token;

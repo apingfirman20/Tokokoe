@@ -18,6 +18,8 @@ export interface MidtransChargeRequest {
   customerName?: string;
   customerEmail?: string;
   businessId: string;
+  serverKey?: string;
+  isProduction?: boolean;
 }
 
 export class MidtransAdapter {
@@ -35,39 +37,43 @@ export class MidtransAdapter {
     return process.env.MIDTRANS_SERVER_KEY || this.serverKey || "";
   }
 
-  public isConfigured(): boolean {
-    const key = this.getServerKey();
+  public isConfigured(customServerKey?: string): boolean {
+    const key = customServerKey || this.getServerKey();
     return Boolean(key && key !== "SB-Mid-server-xxxxxx");
   }
 
-  public verifySignature(notification: MidtransNotificationPayload): boolean {
-    if (!this.isConfigured()) {
+  public verifySignature(notification: MidtransNotificationPayload, customServerKey?: string): boolean {
+    const key = customServerKey || this.getServerKey();
+    if (!this.isConfigured(key)) {
       return false;
     }
 
-    const rawString = `${notification.order_id}${notification.status_code}${notification.gross_amount}${this.getServerKey()}`;
+    const rawString = `${notification.order_id}${notification.status_code}${notification.gross_amount}${key}`;
     const calculatedHash = crypto.createHash("sha512").update(rawString).digest("hex");
 
     return calculatedHash === notification.signature_key;
   }
 
-  public getSnapBaseUrl(): string {
-    const isProd = process.env.MIDTRANS_IS_PRODUCTION === "true" || this.isProduction;
+  public getSnapBaseUrl(customIsProduction?: boolean): string {
+    const isProd = customIsProduction !== undefined 
+      ? customIsProduction 
+      : (process.env.MIDTRANS_IS_PRODUCTION === "true" || this.isProduction);
     return isProd
       ? "https://app.midtrans.com/snap/v1/transactions"
       : "https://app.sandbox.midtrans.com/snap/v1/transactions";
   }
 
   public async createSnapTransaction(request: MidtransChargeRequest): Promise<{ token?: string; redirectUrl?: string; error?: string }> {
-    if (!this.isConfigured()) {
+    const effectiveServerKey = request.serverKey || this.getServerKey();
+    if (!this.isConfigured(effectiveServerKey)) {
       return {
-        error: "Midtrans Server Key belum dikonfigurasi. Silakan lengkapi environment MIDTRANS_SERVER_KEY."
+        error: "Midtrans Server Key belum dikonfigurasi. Silakan isi Server Key pada menu Pengaturan Bisnis."
       };
     }
 
     try {
-      const authHeader = Buffer.from(`${this.getServerKey()}:`).toString("base64");
-      const res = await fetch(this.getSnapBaseUrl(), {
+      const authHeader = Buffer.from(`${effectiveServerKey}:`).toString("base64");
+      const res = await fetch(this.getSnapBaseUrl(request.isProduction), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

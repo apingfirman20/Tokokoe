@@ -60,6 +60,14 @@ export interface ReceiptSettings {
   showItemBarcode?: boolean;
 }
 
+export interface MidtransSettings {
+  isEnabled: boolean;
+  isProduction: boolean;
+  merchantId?: string;
+  clientKey?: string;
+  serverKey?: string;
+}
+
 export interface Business {
   id: string;
   name: string;
@@ -76,6 +84,7 @@ export interface Business {
   serviceChargeRate?: number; // e.g. 5 for 5%
   categories?: string[];
   receiptSettings?: ReceiptSettings;
+  midtransSettings?: MidtransSettings;
   createdAt: number;
   updatedAt: number;
 }

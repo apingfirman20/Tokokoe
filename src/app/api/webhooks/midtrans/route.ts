@@ -14,15 +14,68 @@ export async function POST(request: Request) {
       );
     }
 
-    // 1. Verify Midtrans SHA-512 Signature
-    if (!midtransAdapter.isConfigured()) {
+    // 1. Resolve target Sale Document & merchant keys
+    // Format standar: ${businessId}__${saleId} untuk mencegah tabrakan ID antar tenant
+    const orderId = payload.order_id;
+    let businessId: string = "";
+    let saleId: string = "";
+    let saleRef: FirebaseFirestore.DocumentReference | null = null;
+    let merchantServerKey: string | undefined = undefined;
+
+    if (orderId.includes('__')) {
+      const parts = orderId.split('__');
+      businessId = parts[0];
+      saleId = parts[1];
+      saleRef = adminDb.doc(`businesses/${businessId}/sales/${saleId}`);
+
+      try {
+        const bizSnap = await adminDb.doc(`businesses/${businessId}`).get();
+        if (bizSnap.exists) {
+          const bizData = bizSnap.data() as any;
+          if (bizData?.midtransSettings?.serverKey) {
+            merchantServerKey = bizData.midtransSettings.serverKey;
+          }
+        }
+      } catch (e) {
+        // fallback to server key
+      }
+    } else {
+      // Fallback untuk referensi saleNumber (collectionGroup query)
+      const salesQuery = await adminDb
+        .collectionGroup('sales')
+        .where('saleNumber', '==', orderId)
+        .limit(1)
+        .get();
+
+      if (!salesQuery.empty) {
+        saleRef = salesQuery.docs[0].ref;
+        businessId = salesQuery.docs[0].data().businessId;
+        saleId = salesQuery.docs[0].id;
+        if (businessId) {
+          try {
+            const bizSnap = await adminDb.doc(`businesses/${businessId}`).get();
+            if (bizSnap.exists) {
+              const bizData = bizSnap.data() as any;
+              if (bizData?.midtransSettings?.serverKey) {
+                merchantServerKey = bizData.midtransSettings.serverKey;
+              }
+            }
+          } catch (e) {
+            // fallback
+          }
+        }
+      }
+    }
+
+    // 2. Verify Midtrans SHA-512 Signature (using merchant's key or fallback)
+    if (!midtransAdapter.isConfigured(merchantServerKey)) {
       return NextResponse.json(
         { success: false, message: "Midtrans adapter belum dikonfigurasi pada server ini." },
         { status: 503 }
       );
     }
 
-    const isValidSignature = midtransAdapter.verifySignature(payload);
+    const isValidSignature = midtransAdapter.verifySignature(payload, merchantServerKey);
     if (!isValidSignature) {
       return NextResponse.json(
         { success: false, message: "Tanda tangan digital (signature) webhook Midtrans tidak valid." },
@@ -30,8 +83,7 @@ export async function POST(request: Request) {
       );
     }
 
-    // 2. Parse status and determine payment state
-    const orderId = payload.order_id;
+    // 3. Parse status and determine payment state
     const trxStatus = payload.transaction_status;
     const fraudStatus = payload.fraud_status;
 
@@ -45,32 +97,6 @@ export async function POST(request: Request) {
       targetPaymentStatus = 'failed';
     } else if (trxStatus === 'pending') {
       targetPaymentStatus = 'pending';
-    }
-
-    // 3. Resolve target Sale Document
-    // Format standar: ${businessId}__${saleId} untuk mencegah tabrakan ID antar tenant
-    let businessId: string = "";
-    let saleId: string = "";
-    let saleRef: FirebaseFirestore.DocumentReference | null = null;
-
-    if (orderId.includes('__')) {
-      const parts = orderId.split('__');
-      businessId = parts[0];
-      saleId = parts[1];
-      saleRef = adminDb.doc(`businesses/${businessId}/sales/${saleId}`);
-    } else {
-      // Fallback untuk referensi saleNumber (collectionGroup query)
-      const salesQuery = await adminDb
-        .collectionGroup('sales')
-        .where('saleNumber', '==', orderId)
-        .limit(1)
-        .get();
-
-      if (!salesQuery.empty) {
-        saleRef = salesQuery.docs[0].ref;
-        businessId = salesQuery.docs[0].data()?.businessId;
-        saleId = salesQuery.docs[0].id;
-      }
     }
 
     if (!saleRef || !businessId) {
@@ -173,14 +199,21 @@ export async function POST(request: Request) {
         // ----------------------------------------------------
         if (targetPaymentStatus === 'paid') {
           // SETTLED: Update status penjualan menjadi paid
-          transaction.update(saleRef!, {
+          const updateFields: Record<string, any> = {
             paymentStatus: 'paid',
             paidAmount: saleData.grandTotal,
             settledAt: now,
             midtransTransactionId: payload.transaction_id,
             midtransPaymentType: payload.payment_type,
             updatedAt: now,
-          });
+          };
+
+          // If this was an F&B self-order waiting for cashier confirmation, automatically forward to kitchen
+          if (saleData.orderStatus === 'waiting_cashier') {
+            updateFields.orderStatus = 'new';
+          }
+
+          transaction.update(saleRef!, updateFields);
 
           // Finalisasi status unit IMEI: reserved -> sold & aktifkan garansi
           for (const [imei, { ref: uRef, doc: uDoc }] of imeiUnitDocsMap.entries()) {

@@ -15,7 +15,8 @@ import {
   CreditCard, AlertCircle, Save, Loader2, CheckCircle2,
   Receipt, Image as ImageIcon, SlidersHorizontal, Printer,
   Store, Sparkles, X, Upload, Link2, RotateCcw,
-  Coffee, Smartphone, ShoppingCart
+  Coffee, Smartphone, ShoppingCart, Eye, EyeOff, Copy,
+  ExternalLink, ShieldCheck, Key
 } from 'lucide-react';
 
 export default function SettingsPage() {
@@ -103,6 +104,62 @@ export default function SettingsPage() {
   const [editBranchName, setEditBranchName] = useState('');
   const [editBranchAddress, setEditBranchAddress] = useState('');
   const [editBranchPhone, setEditBranchPhone] = useState('');
+
+  // Midtrans Payment Gateway State
+  const [midtransEnabled, setMidtransEnabled] = useState(activeBusiness?.midtransSettings?.isEnabled ?? false);
+  const [midtransIsProduction, setMidtransIsProduction] = useState(activeBusiness?.midtransSettings?.isProduction ?? true);
+  const [midtransMerchantId, setMidtransMerchantId] = useState(activeBusiness?.midtransSettings?.merchantId || '');
+  const [midtransClientKey, setMidtransClientKey] = useState(activeBusiness?.midtransSettings?.clientKey || '');
+  const [midtransServerKey, setMidtransServerKey] = useState(activeBusiness?.midtransSettings?.serverKey || '');
+  const [showServerKey, setShowServerKey] = useState(false);
+  const [isSavingMidtrans, setIsSavingMidtrans] = useState(false);
+  const [midtransFeedback, setMidtransFeedback] = useState<string | null>(null);
+  const [midtransError, setMidtransError] = useState<string | null>(null);
+  const [webhookCopied, setWebhookCopied] = useState(false);
+
+  useEffect(() => {
+    if (activeBusiness?.midtransSettings) {
+      setMidtransEnabled(activeBusiness.midtransSettings.isEnabled ?? false);
+      setMidtransIsProduction(activeBusiness.midtransSettings.isProduction ?? true);
+      setMidtransMerchantId(activeBusiness.midtransSettings.merchantId || '');
+      setMidtransClientKey(activeBusiness.midtransSettings.clientKey || '');
+      setMidtransServerKey(activeBusiness.midtransSettings.serverKey || '');
+    }
+  }, [activeBusiness?.id, activeBusiness?.midtransSettings]);
+
+  const handleSaveMidtrans = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!activeBusiness) return;
+    setMidtransFeedback(null);
+    setMidtransError(null);
+    setIsSavingMidtrans(true);
+
+    try {
+      const res = await updateBusinessProfile(activeBusiness.id, {
+        name: businessName.trim() || activeBusiness.name,
+        address: address.trim(),
+        phone: phone.trim(),
+        midtransSettings: {
+          isEnabled: midtransEnabled,
+          isProduction: midtransIsProduction,
+          merchantId: midtransMerchantId.trim(),
+          clientKey: midtransClientKey.trim(),
+          serverKey: midtransServerKey.trim(),
+        },
+      });
+
+      if (res.success) {
+        setMidtransFeedback('✓ Kredensial Midtrans berhasil disimpan terisolasi untuk bisnis ini!');
+        setTimeout(() => setMidtransFeedback(null), 4000);
+      } else {
+        setMidtransError(res.error || 'Gagal menyimpan pengaturan Midtrans.');
+      }
+    } catch (err: any) {
+      setMidtransError(err.message || 'Terjadi kesalahan sistem.');
+    } finally {
+      setIsSavingMidtrans(false);
+    }
+  };
 
   const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1076,22 +1133,226 @@ export default function SettingsPage() {
       </div>
 
       {/* 3. Midtrans Payment Gateway Configuration */}
-      <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-xs space-y-4">
-        <h2 className="font-bold text-sm text-slate-900 flex items-center gap-2">
-          <CreditCard className="w-4 h-4 text-indigo-600" />
-          <span>Integrasi Payment Gateway (Midtrans QRIS / Snap)</span>
-        </h2>
+      <form onSubmit={handleSaveMidtrans} className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-xs space-y-5">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3">
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
+              <CreditCard className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="font-extrabold text-sm text-slate-900 flex items-center gap-2">
+                <span>Integrasi Midtrans (QRIS &amp; Pembayaran Digital)</span>
+              </h2>
+              <p className="text-xs text-slate-500">
+                Hubungkan akun Midtrans Anda agar uang transaksi QRIS langsung masuk ke rekening bank toko Anda.
+              </p>
+            </div>
+          </div>
 
-        <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 flex items-start gap-3">
-          <AlertCircle className="w-5 h-5 text-slate-500 shrink-0 mt-0.5" />
-          <div className="space-y-1 text-xs">
-            <div className="font-semibold text-slate-800">Status: Adapter Siap Dikonfigurasi</div>
-            <p className="text-slate-500 text-[11px] leading-relaxed">
-              Tokokoe telah menyediakan adapter payment gateway terisolasi. Untuk mengaktifkan pembayaran dinamis QRIS & Virtual Account secara live, masukkan <code>MIDTRANS_SERVER_KEY</code> dan <code>MIDTRANS_CLIENT_KEY</code> pada file konfigurasi environment server (<code>.env.local</code>).
-            </p>
+          <div>
+            {midtransEnabled && midtransServerKey ? (
+              <span className={`px-2.5 py-1 rounded-full text-xs font-bold flex items-center gap-1.5 ${
+                midtransIsProduction 
+                  ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' 
+                  : 'bg-amber-100 text-amber-800 border border-amber-300'
+              }`}>
+                <ShieldCheck className="w-3.5 h-3.5" />
+                <span>{midtransIsProduction ? 'Live (Production)' : 'Sandbox (Uji Coba)'}</span>
+              </span>
+            ) : (
+              <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-slate-100 text-slate-600 border border-slate-200">
+                Belum Terhubung
+              </span>
+            )}
           </div>
         </div>
-      </div>
+
+        {midtransFeedback && (
+          <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span>{midtransFeedback}</span>
+          </div>
+        )}
+
+        {midtransError && (
+          <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-semibold flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+            <span>{midtransError}</span>
+          </div>
+        )}
+
+        {/* Toggle Aktivasi */}
+        <div className="p-4 rounded-xl bg-slate-50 border border-slate-200/80 flex items-center justify-between">
+          <div>
+            <div className="text-xs font-bold text-slate-900">Aktifkan Pembayaran QRIS Midtrans</div>
+            <div className="text-[11px] text-slate-500 mt-0.5">
+              Jika aktif, pelanggan dapat scan dan membayar pesanan via QRIS (BCA, GoPay, OVO, ShopeePay, Dana, dll).
+            </div>
+          </div>
+          <label className="relative inline-flex items-center cursor-pointer">
+            <input
+              type="checkbox"
+              checked={midtransEnabled}
+              onChange={(e) => setMidtransEnabled(e.target.checked)}
+              className="sr-only peer"
+            />
+            <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+          </label>
+        </div>
+
+        {/* Mode Environment */}
+        <div>
+          <label className="block text-xs font-bold text-slate-700 mb-1.5">
+            Lingkungan Midtrans (Environment) <span className="text-rose-500">*</span>
+          </label>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div
+              onClick={() => setMidtransIsProduction(true)}
+              className={`p-3.5 rounded-xl border-2 cursor-pointer transition-all ${
+                midtransIsProduction
+                  ? 'border-indigo-600 bg-indigo-50/50 ring-2 ring-indigo-500/10'
+                  : 'border-slate-200 hover:border-slate-300 bg-white'
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-xs text-slate-900">Production (Live / Transaksi Nyata)</span>
+                {midtransIsProduction && <Check className="w-4 h-4 text-indigo-600" />}
+              </div>
+              <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
+                Gunakan jika akun Midtrans Anda sudah aktif/disetujui untuk menerima uang riil langsung ke rekening bank toko.
+              </p>
+            </div>
+
+            <div
+              onClick={() => setMidtransIsProduction(false)}
+              className={`p-3.5 rounded-xl border-2 cursor-pointer transition-all ${
+                !midtransIsProduction
+                  ? 'border-indigo-600 bg-indigo-50/50 ring-2 ring-indigo-500/10'
+                  : 'border-slate-200 hover:border-slate-300 bg-white'
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-xs text-slate-900">Sandbox (Simulasi / Uji Coba)</span>
+                {!midtransIsProduction && <Check className="w-4 h-4 text-indigo-600" />}
+              </div>
+              <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
+                Mode pengetesan tanpa uang nyata. Cocok untuk simulasi alur pembayaran sebelum toko dibuka.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Input Kredensial Keys */}
+        <div className="space-y-3.5 pt-1">
+          <div>
+            <label className="block text-xs font-bold text-slate-700 mb-1">
+              Merchant ID <span className="text-slate-400 font-normal">(Dari menu Settings &gt; Access Keys, contoh: G123456789)</span>
+            </label>
+            <input
+              type="text"
+              value={midtransMerchantId}
+              onChange={(e) => setMidtransMerchantId(e.target.value)}
+              placeholder="G123456789"
+              className="w-full text-xs font-mono p-2.5 rounded-xl border border-slate-300 outline-none focus:border-indigo-500"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-slate-700 mb-1">
+              Client Key <span className="text-slate-400 font-normal">(Dari menu Settings &gt; Access Keys)</span>
+            </label>
+            <input
+              type="text"
+              value={midtransClientKey}
+              onChange={(e) => setMidtransClientKey(e.target.value)}
+              placeholder="Mid-client-xxxxxxxxxxxxxx atau SB-Mid-client-xxxxxxxxxxxxxx"
+              className="w-full text-xs font-mono p-2.5 rounded-xl border border-slate-300 outline-none focus:border-indigo-500"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-slate-700 mb-1">
+              Server Key <span className="text-rose-500">*</span> <span className="text-slate-400 font-normal">(Kunci privat rahasia)</span>
+            </label>
+            <div className="relative">
+              <input
+                type={showServerKey ? 'text' : 'password'}
+                value={midtransServerKey}
+                onChange={(e) => setMidtransServerKey(e.target.value)}
+                placeholder="Mid-server-xxxxxxxxxxxxxx atau SB-Mid-server-xxxxxxxxxxxxxx"
+                className="w-full text-xs font-mono p-2.5 pr-10 rounded-xl border border-slate-300 outline-none focus:border-indigo-500"
+              />
+              <button
+                type="button"
+                onClick={() => setShowServerKey(!showServerKey)}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700"
+              >
+                {showServerKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Panduan Integrasi Step-by-Step */}
+        <div className="p-4 rounded-2xl bg-indigo-50/70 border border-indigo-200/80 space-y-3">
+          <div className="flex items-center gap-2 text-indigo-900 font-bold text-xs">
+            <Key className="w-4 h-4 text-indigo-600" />
+            <span>Cara Mendapatkan Kunci &amp; Mengatur Webhook di Midtrans:</span>
+          </div>
+
+          <ol className="text-xs text-slate-700 space-y-2 list-decimal list-inside leading-relaxed pl-1">
+            <li>
+              Buka dashboard Midtrans Anda di{' '}
+              <a 
+                href="https://dashboard.midtrans.com" 
+                target="_blank" 
+                rel="noreferrer" 
+                className="text-indigo-600 underline font-semibold inline-flex items-center gap-0.5"
+              >
+                dashboard.midtrans.com <ExternalLink className="w-3 h-3 inline" />
+              </a>.
+            </li>
+            <li>
+              Di menu bilah kiri, klik <strong>Settings</strong> &gt; <strong>Access Keys</strong>. Salin <strong>Merchant ID</strong>, <strong>Client Key</strong>, dan <strong>Server Key</strong> lalu tempelkan ke kolom di atas.
+            </li>
+            <li>
+              Di menu bilah kiri, klik <strong>Settings</strong> &gt; <strong>Configuration</strong>, lalu salin dan tempelkan link di bawah ini ke kolom <strong>Payment Notification URL</strong>:
+            </li>
+          </ol>
+
+          {/* Webhook Copy Box */}
+          <div className="p-2.5 bg-white rounded-xl border border-indigo-200 flex items-center justify-between gap-2">
+            <div className="font-mono text-[11px] text-slate-800 truncate select-all">
+              https://tokokoe-saas.vercel.app/api/webhooks/midtrans
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                navigator.clipboard.writeText('https://tokokoe-saas.vercel.app/api/webhooks/midtrans');
+                setWebhookCopied(true);
+                setTimeout(() => setWebhookCopied(false), 3000);
+              }}
+              className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-[11px] shrink-0 flex items-center gap-1 transition-all active:scale-95"
+            >
+              {webhookCopied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+              <span>{webhookCopied ? 'Tersalin!' : 'Salin URL'}</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Tombol Simpan */}
+        <div className="flex justify-end pt-2">
+          <button
+            type="submit"
+            disabled={isSavingMidtrans}
+            className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs flex items-center gap-2 shadow-md shadow-indigo-600/20 disabled:opacity-50 transition-all active:scale-98"
+          >
+            {isSavingMidtrans && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+            <Save className="w-3.5 h-3.5" />
+            <span>Simpan Konfigurasi Midtrans</span>
+          </button>
+        </div>
+      </form>
     </div>
   );
 }

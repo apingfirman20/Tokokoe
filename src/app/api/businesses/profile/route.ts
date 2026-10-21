@@ -23,6 +23,14 @@ const receiptSettingsSchema = z.object({
   showItemBarcode: z.boolean().optional(),
 }).optional();
 
+const midtransSettingsSchema = z.object({
+  isEnabled: z.boolean().default(false),
+  isProduction: z.boolean().default(false),
+  merchantId: z.string().trim().optional(),
+  clientKey: z.string().trim().optional(),
+  serverKey: z.string().trim().optional(),
+}).optional();
+
 const updateProfileSchema = z.object({
   businessId: z.string().min(1, "businessId wajib diisi"),
   name: z.string().trim().min(1, "Nama usaha wajib diisi").max(100),
@@ -30,6 +38,7 @@ const updateProfileSchema = z.object({
   address: z.string().trim().default(""),
   logoUrl: z.string().trim().optional(),
   receiptSettings: receiptSettingsSchema,
+  midtransSettings: midtransSettingsSchema,
 });
 
 export async function PUT(request: Request) {
@@ -45,7 +54,7 @@ export async function PUT(request: Request) {
       );
     }
 
-    const { businessId, name, phone, address, logoUrl, receiptSettings } = parsed.data;
+    const { businessId, name, phone, address, logoUrl, receiptSettings, midtransSettings } = parsed.data;
 
     // Check authority: caller must be owner or manager with business.settings.manage
     await requireBusinessPermission(businessId, authUser.uid, "business.settings.manage");
@@ -69,6 +78,9 @@ export async function PUT(request: Request) {
     }
     if (receiptSettings !== undefined) {
       updates.receiptSettings = receiptSettings;
+    }
+    if (midtransSettings !== undefined) {
+      updates.midtransSettings = midtransSettings;
     }
 
     await bizRef.update(updates);
